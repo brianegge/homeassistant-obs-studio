@@ -17,8 +17,8 @@ async def _test_connection(hass: HomeAssistant, host: str, port: int, password: 
     """Test that we can connect to OBS WebSocket. Raises on failure."""
     import obsws_python as obs
 
-    def _connect():
-        kwargs = {"host": host, "port": port, "timeout": 5}
+    def _connect() -> None:
+        kwargs: dict[str, Any] = {"host": host, "port": port, "timeout": 5}
         if password:
             kwargs["password"] = password
         client = obs.ReqClient(**kwargs)

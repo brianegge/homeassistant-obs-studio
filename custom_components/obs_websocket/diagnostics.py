@@ -5,14 +5,15 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
+from homeassistant.core import HomeAssistant
 
 from . import OBSConfigEntry
 
-TO_REDACT = {"password", "key"}
+TO_REDACT: set[str] = {"password", "key"}
 
 
 async def async_get_config_entry_diagnostics(
-    hass: Any, entry: OBSConfigEntry
+    hass: HomeAssistant, entry: OBSConfigEntry
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
     coordinator = entry.runtime_data.coordinator

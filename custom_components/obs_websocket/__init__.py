@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import dataclass
 import logging
 from datetime import timedelta
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -38,16 +39,20 @@ class OBSConnection:
         self.host = host
         self._port = port
         self._password = password
-        self._req_client = None
-        self._event_client = None
-        self.coordinator: DataUpdateCoordinator | None = None
+        self._req_client: Any | None = None
+        self._event_client: Any | None = None
+        self.coordinator: DataUpdateCoordinator[dict[str, Any]] | None = None
 
     @property
     def connected(self) -> bool:
         return self._req_client is not None
 
-    def _get_kwargs(self) -> dict:
-        kwargs = {"host": self.host, "port": self._port, "timeout": 10}
+    def _get_kwargs(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "host": self.host,
+            "port": self._port,
+            "timeout": 10,
+        }
         if self._password:
             kwargs["password"] = self._password
         return kwargs
@@ -56,13 +61,13 @@ class OBSConnection:
         """Create persistent ReqClient and EventClient connections."""
         conn = self
 
-        def _connect():
+        def _connect() -> None:
             import obsws_python as obs
 
             conn._req_client = obs.ReqClient(**conn._get_kwargs())
 
             class _Events(obs.EventClient):
-                def on_stream_state_changed(self_, data):
+                def on_stream_state_changed(self_: Any, data: Any) -> None:
                     conn._on_event()
 
             conn._event_client = _Events(**conn._get_kwargs())
@@ -78,10 +83,10 @@ class OBSConnection:
             self.hass.loop,
         )
 
-    async def async_fetch_data(self) -> dict:
+    async def async_fetch_data(self) -> dict[str, Any]:
         """Fetch current state using the persistent ReqClient."""
 
-        def _fetch():
+        def _fetch() -> dict[str, Any]:
             status = self._req_client.get_stream_status()
             service = self._req_client.get_stream_service_settings()
             return {"stream_status": status, "service_settings": service}
@@ -91,7 +96,7 @@ class OBSConnection:
     async def async_disconnect(self) -> None:
         """Disconnect both clients."""
 
-        def _disconnect():
+        def _disconnect() -> None:
             for client in (self._event_client, self._req_client):
                 if client:
                     try:
@@ -104,7 +109,7 @@ class OBSConnection:
         await self.hass.async_add_executor_job(_disconnect)
 
 
-class OBSCoordinator(DataUpdateCoordinator):
+class OBSCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator with persistent connection and event-driven refresh."""
 
     def __init__(
@@ -119,7 +124,7 @@ class OBSCoordinator(DataUpdateCoordinator):
         self.connection = connection
         self._was_available = True
 
-    async def _async_update_data(self) -> dict:
+    async def _async_update_data(self) -> dict[str, Any]:
         try:
             if not self.connection.connected:
                 await self.connection.async_connect()

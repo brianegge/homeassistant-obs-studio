@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.const import EntityCategory
@@ -74,7 +75,7 @@ class OBSStreamStatusSensor(OBSSensorBase):
         return "idle"
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return stream statistics."""
         if self.coordinator.data is None:
             return {}
@@ -110,7 +111,7 @@ class OBSStreamServiceSensor(OBSSensorBase):
         return getattr(svc, "stream_service_type", None)
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return stream service settings."""
         if self.coordinator.data is None:
             return {}

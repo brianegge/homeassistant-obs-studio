@@ -1,10 +1,14 @@
 """Constants for the OBS WebSocket integration."""
 
-DOMAIN = "obs_websocket"
+from __future__ import annotations
 
-DEFAULT_HOST = "localhost"
-DEFAULT_PORT = 4455
+from typing import Final
 
-HEARTBEAT_INTERVAL = 60
+DOMAIN: Final = "obs_websocket"
 
-PLATFORMS = ["sensor"]
+DEFAULT_HOST: Final = "localhost"
+DEFAULT_PORT: Final = 4455
+
+HEARTBEAT_INTERVAL: Final = 60
+
+PLATFORMS: Final[list[str]] = ["sensor"]
