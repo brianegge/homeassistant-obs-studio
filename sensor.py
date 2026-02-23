@@ -92,6 +92,7 @@ class OBSStreamServiceSensor(OBSSensorBase):
 
     _attr_translation_key = "stream_service"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator: OBSCoordinator, entry: OBSConfigEntry) -> None:
         """Initialize."""

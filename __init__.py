@@ -134,7 +134,12 @@ class OBSCoordinator(DataUpdateCoordinator):
                 )
                 self._was_available = False
             raise UpdateFailed(
-                f"Error communicating with OBS: {err}"
+                translation_domain=DOMAIN,
+                translation_key="communication_error",
+                translation_placeholders={
+                    "host": self.connection.host,
+                    "error": str(err),
+                },
             ) from err
 
         if not self._was_available:
@@ -158,7 +163,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: OBSConfigEntry) -> bool:
         await connection.async_connect()
     except Exception as err:
         raise ConfigEntryNotReady(
-            f"Cannot connect to OBS WebSocket at {entry.data['host']}: {err}"
+            translation_domain=DOMAIN,
+            translation_key="connection_failed",
+            translation_placeholders={"host": entry.data["host"], "error": str(err)},
         ) from err
 
     coordinator = OBSCoordinator(hass, connection)

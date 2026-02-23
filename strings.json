@@ -48,6 +48,9 @@
     }
   },
   "exceptions": {
+    "connection_failed": {
+      "message": "Cannot connect to OBS WebSocket at {host}: {error}"
+    },
     "communication_error": {
       "message": "Error communicating with OBS WebSocket at {host}: {error}"
     }

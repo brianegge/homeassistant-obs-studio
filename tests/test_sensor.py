@@ -14,6 +14,9 @@ from custom_components.obs_websocket.sensor import OBSStreamStatusSensor, OBSStr
 
 from .conftest import MOCK_CONFIG, MOCK_HOST, MOCK_PORT, make_stream_status, make_service_settings
 
+SERVICE_ENTITY_ID = "sensor.obs_studio_192_168_1_100_none_2"
+STATUS_ENTITY_ID = "sensor.obs_studio_192_168_1_100_none"
+
 
 def _make_mock_obs(req_client: MagicMock) -> MagicMock:
     """Create a mock obsws_python module."""
@@ -59,7 +62,8 @@ def _make_req_client(
 
 
 async def _setup_integration(
-    hass: HomeAssistant, req_client: MagicMock
+    hass: HomeAssistant,
+    req_client: MagicMock,
 ) -> MockConfigEntry:
     """Set up the integration with a mock client."""
     entry = MockConfigEntry(
@@ -84,7 +88,7 @@ async def test_stream_status_idle(hass: HomeAssistant) -> None:
     req_client = _make_req_client(active=False)
     await _setup_integration(hass, req_client)
 
-    state = hass.states.get("sensor.obs_studio_192_168_1_100_none")
+    state = hass.states.get(STATUS_ENTITY_ID)
     assert state is not None
     assert state.state == "idle"
 
@@ -102,7 +106,7 @@ async def test_stream_status_streaming(hass: HomeAssistant) -> None:
     )
     await _setup_integration(hass, req_client)
 
-    state = hass.states.get("sensor.obs_studio_192_168_1_100_none")
+    state = hass.states.get(STATUS_ENTITY_ID)
     assert state is not None
     assert state.state == "streaming"
     assert state.attributes["output_bytes"] == 1024000
@@ -118,34 +122,50 @@ async def test_stream_status_reconnecting(hass: HomeAssistant) -> None:
     req_client = _make_req_client(active=True, reconnecting=True)
     await _setup_integration(hass, req_client)
 
-    state = hass.states.get("sensor.obs_studio_192_168_1_100_none")
+    state = hass.states.get(STATUS_ENTITY_ID)
     assert state is not None
     assert state.state == "reconnecting"
 
 
 async def test_stream_service_sensor(hass: HomeAssistant) -> None:
-    """Test stream service sensor shows service type and settings."""
+    """Test stream service sensor returns correct values."""
     settings = {"server": "rtmp://live.twitch.tv/app", "key": "live_key123"}
     req_client = _make_req_client(
         service_type="rtmp_common",
         service_settings=settings,
     )
+    entry = await _setup_integration(hass, req_client)
+
+    coordinator = entry.runtime_data.coordinator
+    sensor = OBSStreamServiceSensor(coordinator, entry)
+
+    assert sensor.native_value == "rtmp_common"
+    assert sensor.extra_state_attributes == {"stream_service_settings": settings}
+
+
+async def test_service_sensor_disabled_by_default(hass: HomeAssistant) -> None:
+    """Test stream service sensor is disabled by default."""
+    req_client = _make_req_client()
     await _setup_integration(hass, req_client)
 
-    state = hass.states.get("sensor.obs_studio_192_168_1_100_none_2")
-    assert state is not None
-    assert state.state == "rtmp_common"
-    assert state.attributes["stream_service_settings"] == settings
+    # Entity should be registered but not have a state
+    state = hass.states.get(SERVICE_ENTITY_ID)
+    assert state is None
+
+    ent_reg = er.async_get(hass)
+    entity = ent_reg.async_get(SERVICE_ENTITY_ID)
+    assert entity is not None
+    assert entity.disabled_by is er.RegistryEntryDisabler.INTEGRATION
 
 
 async def test_sensors_unavailable_on_connection_failure(
     hass: HomeAssistant,
 ) -> None:
-    """Test sensors become unavailable when connection drops."""
+    """Test stream status sensor becomes unavailable when connection drops."""
     req_client = _make_req_client(active=True)
     entry = await _setup_integration(hass, req_client)
 
-    state = hass.states.get("sensor.obs_studio_192_168_1_100_none")
+    state = hass.states.get(STATUS_ENTITY_ID)
     assert state.state == "streaming"
 
     # Simulate connection failure
@@ -155,20 +175,19 @@ async def test_sensors_unavailable_on_connection_failure(
     await coordinator.async_refresh()
     await hass.async_block_till_done()
 
-    state = hass.states.get("sensor.obs_studio_192_168_1_100_none")
-    assert state.state == STATE_UNAVAILABLE
-
-    state = hass.states.get("sensor.obs_studio_192_168_1_100_none_2")
+    state = hass.states.get(STATUS_ENTITY_ID)
     assert state.state == STATE_UNAVAILABLE
 
 
-async def test_two_sensors_created(hass: HomeAssistant) -> None:
-    """Test that both sensors are created."""
+async def test_two_sensors_registered(hass: HomeAssistant) -> None:
+    """Test that both sensors are registered in the entity registry."""
     req_client = _make_req_client()
     await _setup_integration(hass, req_client)
 
-    status = hass.states.get("sensor.obs_studio_192_168_1_100_none")
-    service = hass.states.get("sensor.obs_studio_192_168_1_100_none_2")
+    ent_reg = er.async_get(hass)
+
+    status = ent_reg.async_get(STATUS_ENTITY_ID)
+    service = ent_reg.async_get(SERVICE_ENTITY_ID)
 
     assert status is not None
     assert service is not None
@@ -179,7 +198,7 @@ async def test_stream_status_attributes_when_idle(hass: HomeAssistant) -> None:
     req_client = _make_req_client(active=False)
     await _setup_integration(hass, req_client)
 
-    state = hass.states.get("sensor.obs_studio_192_168_1_100_none")
+    state = hass.states.get(STATUS_ENTITY_ID)
     assert state.state == "idle"
     assert "output_bytes" in state.attributes
     assert "output_timecode" in state.attributes
@@ -213,6 +232,6 @@ async def test_service_sensor_entity_category(hass: HomeAssistant) -> None:
     await _setup_integration(hass, req_client)
 
     ent_reg = er.async_get(hass)
-    entity = ent_reg.async_get("sensor.obs_studio_192_168_1_100_none_2")
+    entity = ent_reg.async_get(SERVICE_ENTITY_ID)
     assert entity is not None
     assert entity.entity_category == EntityCategory.DIAGNOSTIC
