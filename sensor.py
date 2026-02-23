@@ -53,7 +53,6 @@ class OBSStreamStatusSensor(OBSSensorBase):
     """Sensor showing OBS stream status."""
 
     _attr_translation_key = "stream_status"
-    _attr_icon = "mdi:broadcast"
 
     def __init__(self, coordinator: OBSCoordinator, entry: OBSConfigEntry) -> None:
         """Initialize."""
@@ -92,7 +91,6 @@ class OBSStreamServiceSensor(OBSSensorBase):
     """Sensor showing OBS stream service configuration."""
 
     _attr_translation_key = "stream_service"
-    _attr_icon = "mdi:cog-play"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: OBSCoordinator, entry: OBSConfigEntry) -> None:

@@ -47,6 +47,11 @@
       "reconfigure_successful": "Reconfiguration was successful"
     }
   },
+  "exceptions": {
+    "communication_error": {
+      "message": "Error communicating with OBS WebSocket at {host}: {error}"
+    }
+  },
   "entity": {
     "sensor": {
       "stream_status": {

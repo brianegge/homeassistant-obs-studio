@@ -1,0 +1,17 @@
+{
+  "entity": {
+    "sensor": {
+      "stream_status": {
+        "default": "mdi:broadcast",
+        "state": {
+          "streaming": "mdi:broadcast",
+          "reconnecting": "mdi:broadcast-off",
+          "idle": "mdi:broadcast-off"
+        }
+      },
+      "stream_service": {
+        "default": "mdi:cog-play"
+      }
+    }
+  }
+}
