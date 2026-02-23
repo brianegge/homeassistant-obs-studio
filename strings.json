@@ -21,5 +21,20 @@
     "abort": {
       "already_configured": "This OBS instance is already configured"
     }
+  },
+  "entity": {
+    "sensor": {
+      "stream_status": {
+        "name": "Stream status",
+        "state": {
+          "idle": "Idle",
+          "streaming": "Streaming",
+          "reconnecting": "Reconnecting"
+        }
+      },
+      "stream_service": {
+        "name": "Stream service"
+      }
+    }
   }
 }

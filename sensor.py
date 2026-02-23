@@ -1,23 +1,29 @@
 """Sensor platform for OBS WebSocket."""
 
+from __future__ import annotations
+
 import logging
 
 from homeassistant.components.sensor import SensorEntity
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+from . import OBSConfigEntry, OBSCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+PARALLEL_UPDATES = 1
+
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant, entry: OBSConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up OBS WebSocket sensors from a config entry."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator = entry.runtime_data.coordinator
 
     async_add_entities(
         [
@@ -27,16 +33,32 @@ async def async_setup_entry(
     )
 
 
-class OBSStreamStatusSensor(CoordinatorEntity, SensorEntity):
-    """Sensor showing OBS stream status."""
+class OBSSensorBase(CoordinatorEntity[OBSCoordinator], SensorEntity):
+    """Base class for OBS sensors."""
 
-    _attr_icon = "mdi:broadcast"
+    _attr_has_entity_name = True
 
-    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: OBSCoordinator, entry: OBSConfigEntry) -> None:
         """Initialize."""
         super().__init__(coordinator)
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=f"OBS Studio ({entry.data['host']})",
+            manufacturer="OBS Project",
+            sw_version=None,
+        )
+
+
+class OBSStreamStatusSensor(OBSSensorBase):
+    """Sensor showing OBS stream status."""
+
+    _attr_translation_key = "stream_status"
+    _attr_icon = "mdi:broadcast"
+
+    def __init__(self, coordinator: OBSCoordinator, entry: OBSConfigEntry) -> None:
+        """Initialize."""
+        super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_stream_status"
-        self._attr_name = "OBS Stream Status"
 
     @property
     def native_value(self) -> str | None:
@@ -66,16 +88,17 @@ class OBSStreamStatusSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class OBSStreamServiceSensor(CoordinatorEntity, SensorEntity):
+class OBSStreamServiceSensor(OBSSensorBase):
     """Sensor showing OBS stream service configuration."""
 
+    _attr_translation_key = "stream_service"
     _attr_icon = "mdi:cog-play"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
-    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: OBSCoordinator, entry: OBSConfigEntry) -> None:
         """Initialize."""
-        super().__init__(coordinator)
+        super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_stream_service"
-        self._attr_name = "OBS Stream Service"
 
     @property
     def native_value(self) -> str | None:

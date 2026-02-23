@@ -1,6 +1,9 @@
 """OBS WebSocket integration with persistent push connection."""
 
+from __future__ import annotations
+
 import asyncio
+from dataclasses import dataclass
 import logging
 from datetime import timedelta
 
@@ -9,6 +12,17 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DOMAIN, HEARTBEAT_INTERVAL, PLATFORMS
+
+
+@dataclass
+class OBSRuntimeData:
+    """Runtime data for the OBS WebSocket integration."""
+
+    connection: OBSConnection
+    coordinator: OBSCoordinator
+
+
+type OBSConfigEntry = ConfigEntry[OBSRuntimeData]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -113,10 +127,8 @@ class OBSCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Error communicating with OBS: {err}") from err
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: OBSConfigEntry) -> bool:
     """Set up OBS WebSocket from a config entry."""
-    hass.data.setdefault(DOMAIN, {})
-
     connection = OBSConnection(
         hass,
         host=entry.data["host"],
@@ -130,19 +142,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     connection.coordinator = coordinator
     await coordinator.async_config_entry_first_refresh()
 
-    hass.data[DOMAIN][entry.entry_id] = {
-        "connection": connection,
-        "coordinator": coordinator,
-    }
+    entry.runtime_data = OBSRuntimeData(
+        connection=connection,
+        coordinator=coordinator,
+    )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: OBSConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        data = hass.data[DOMAIN].pop(entry.entry_id)
-        await data["connection"].async_disconnect()
+        await entry.runtime_data.connection.async_disconnect()
     return unload_ok
