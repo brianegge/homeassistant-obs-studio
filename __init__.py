@@ -116,15 +116,32 @@ class OBSCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(seconds=HEARTBEAT_INTERVAL),
         )
         self.connection = connection
+        self._was_available = True
 
     async def _async_update_data(self) -> dict:
         try:
             if not self.connection.connected:
                 await self.connection.async_connect()
-            return await self.connection.async_fetch_data()
+            data = await self.connection.async_fetch_data()
         except Exception as err:
             await self.connection.async_disconnect()
-            raise UpdateFailed(f"Error communicating with OBS: {err}") from err
+            if self._was_available:
+                _LOGGER.warning(
+                    "OBS WebSocket (%s) is unavailable: %s",
+                    self.connection.host,
+                    err,
+                )
+                self._was_available = False
+            raise UpdateFailed(
+                f"Error communicating with OBS: {err}"
+            ) from err
+
+        if not self._was_available:
+            _LOGGER.info(
+                "OBS WebSocket (%s) is available again", self.connection.host
+            )
+            self._was_available = True
+        return data
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: OBSConfigEntry) -> bool:
