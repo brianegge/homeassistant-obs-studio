@@ -13,13 +13,38 @@
           "port": "WebSocket server port (default 4455)",
           "password": "WebSocket server password (leave blank if none)"
         }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate OBS WebSocket",
+        "description": "The connection to OBS failed. Please update the password.",
+        "data": {
+          "password": "Password"
+        },
+        "data_description": {
+          "password": "WebSocket server password (leave blank if none)"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure OBS WebSocket",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "Hostname or IP address of the OBS machine",
+          "port": "WebSocket server port (default 4455)",
+          "password": "WebSocket server password (leave blank if none)"
+        }
       }
     },
     "error": {
       "cannot_connect": "Failed to connect to OBS WebSocket"
     },
     "abort": {
-      "already_configured": "This OBS instance is already configured"
+      "already_configured": "This OBS instance is already configured",
+      "reauth_successful": "Re-authentication was successful",
+      "reconfigure_successful": "Reconfiguration was successful"
     }
   },
   "entity": {
