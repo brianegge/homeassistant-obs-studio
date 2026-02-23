@@ -1,0 +1,25 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "OBS WebSocket Connection",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "Hostname or IP address of the OBS machine",
+          "port": "WebSocket server port (default 4455)",
+          "password": "WebSocket server password (leave blank if none)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to OBS WebSocket"
+    },
+    "abort": {
+      "already_configured": "This OBS instance is already configured"
+    }
+  }
+}
