@@ -3,7 +3,7 @@
   "name": "OBS WebSocket",
   "codeowners": ["@brianegge"],
   "config_flow": true,
-  "documentation": "",
+  "documentation": "https://github.com/brianegge/obs-websocket",
   "iot_class": "local_push",
   "requirements": ["obsws-python==1.8.0"],
   "version": "1.0.0"

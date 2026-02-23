@@ -7,16 +7,28 @@ Custom Home Assistant integration (`obs_websocket`) that monitors OBS Studio via
 ## Directory Structure
 
 ```
-obs_websocket/
-├── __init__.py       # Core: OBSConnection, OBSCoordinator, OBSRuntimeData, OBSConfigEntry
-├── config_flow.py    # Config flow: user setup, reauth, reconfigure
-├── const.py          # Constants: DOMAIN, defaults, HEARTBEAT_INTERVAL, PLATFORMS
-├── icons.json        # Icon translations (per-state icons for sensors)
-├── manifest.json     # Integration metadata and dependencies
-├── sensor.py         # Sensor entities: OBSStreamStatusSensor, OBSStreamServiceSensor
-├── strings.json      # UI localization: config flow, entity names/states, exceptions
-├── README.md         # User-facing documentation
-└── AGENTS.md         # This file
+ha-obs-websocket/                # Git repo root (~/dev/ha-obs-websocket)
+├── custom_components/
+│   └── obs_websocket/
+│       ├── __init__.py          # Core: OBSConnection, OBSCoordinator, OBSRuntimeData, OBSConfigEntry
+│       ├── config_flow.py       # Config flow: user setup, reauth, reconfigure
+│       ├── const.py             # Constants: DOMAIN, defaults, HEARTBEAT_INTERVAL, PLATFORMS
+│       ├── diagnostics.py       # Diagnostics support
+│       ├── icons.json           # Icon translations (per-state icons for sensors)
+│       ├── manifest.json        # Integration metadata and dependencies
+│       ├── sensor.py            # Sensor entities: OBSStreamStatusSensor, OBSStreamServiceSensor
+│       └── strings.json         # UI localization: config flow, entity names/states, exceptions
+├── tests/                       # Test suite
+│   ├── conftest.py
+│   ├── test_config_flow.py
+│   ├── test_diagnostics.py
+│   ├── test_init.py
+│   └── test_sensor.py
+├── .github/                     # GitHub config (dependabot, workflows)
+├── hacs.json                    # HACS repository metadata
+├── README.md                    # User-facing documentation
+├── AGENTS.md                    # This file
+└── pytest.ini                   # Pytest configuration
 ```
 
 ## Key Classes
@@ -95,7 +107,7 @@ When the connection drops, the coordinator logs a warning, marks entities unavai
 
 ## Testing
 
-No test suite currently exists. When adding tests:
-- Use `pytest-homeassistant-custom-component` for HA integration testing.
-- Mock `obsws_python.ReqClient` and `obsws_python.EventClient`.
-- Test config flow validation (user, reauth, reconfigure), coordinator updates, and sensor state mapping.
+Tests are in `tests/` at the repo root. Run with `pytest` from the repo root.
+- Uses `pytest-homeassistant-custom-component` for HA integration testing.
+- Mocks `obsws_python.ReqClient` and `obsws_python.EventClient`.
+- Covers config flow (user, reauth, reconfigure), coordinator updates, sensor state mapping, and diagnostics.
