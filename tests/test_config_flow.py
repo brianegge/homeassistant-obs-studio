@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
@@ -188,3 +189,54 @@ async def test_user_flow_no_password(hass: HomeAssistant) -> None:
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"]["password"] == ""
     mock_test.assert_called_once_with(hass, MOCK_HOST, MOCK_PORT, "")
+
+
+async def test_test_connection_with_password(hass: HomeAssistant) -> None:
+    """Test _test_connection exercises obsws_python with password."""
+    mock_client = MagicMock()
+    mock_client.get_version.return_value = SimpleNamespace(obs_version="30.0.0")
+    mock_obs = MagicMock()
+    mock_obs.ReqClient.return_value = mock_client
+
+    with patch.dict("sys.modules", {"obsws_python": mock_obs}):
+        from custom_components.obs_websocket.config_flow import _test_connection
+
+        await _test_connection(hass, MOCK_HOST, MOCK_PORT, MOCK_PASSWORD)
+
+    mock_obs.ReqClient.assert_called_once_with(
+        host=MOCK_HOST, port=MOCK_PORT, timeout=5, password=MOCK_PASSWORD
+    )
+    mock_client.get_version.assert_called_once()
+    mock_client.disconnect.assert_called_once()
+
+
+async def test_test_connection_without_password(hass: HomeAssistant) -> None:
+    """Test _test_connection exercises obsws_python without password."""
+    mock_client = MagicMock()
+    mock_client.get_version.return_value = SimpleNamespace(obs_version="30.0.0")
+    mock_obs = MagicMock()
+    mock_obs.ReqClient.return_value = mock_client
+
+    with patch.dict("sys.modules", {"obsws_python": mock_obs}):
+        from custom_components.obs_websocket.config_flow import _test_connection
+
+        await _test_connection(hass, MOCK_HOST, MOCK_PORT, "")
+
+    mock_obs.ReqClient.assert_called_once_with(
+        host=MOCK_HOST, port=MOCK_PORT, timeout=5
+    )
+
+
+async def test_test_connection_failure(hass: HomeAssistant) -> None:
+    """Test _test_connection raises when OBS is unreachable."""
+    mock_obs = MagicMock()
+    mock_obs.ReqClient.side_effect = ConnectionRefusedError("Connection refused")
+
+    with patch.dict("sys.modules", {"obsws_python": mock_obs}):
+        from custom_components.obs_websocket.config_flow import _test_connection
+
+        try:
+            await _test_connection(hass, MOCK_HOST, MOCK_PORT, MOCK_PASSWORD)
+            assert False, "Should have raised"
+        except ConnectionRefusedError:
+            pass
