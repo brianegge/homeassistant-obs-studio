@@ -15,8 +15,8 @@ from custom_components.obs_websocket.const import DOMAIN
 
 from .conftest import MOCK_CONFIG, MOCK_HOST, MOCK_PORT, make_service_settings, make_stream_status
 
-START_ENTITY_ID = "button.obs_studio_192_168_1_100_none"
-STOP_ENTITY_ID = "button.obs_studio_192_168_1_100_none_2"
+START_ENTITY_ID = "button.obs_studio_192_168_1_100"
+STOP_ENTITY_ID = "button.obs_studio_192_168_1_100_2"
 
 
 def _make_mock_obs(req_client: MagicMock) -> MagicMock:
