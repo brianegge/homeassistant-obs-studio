@@ -15,8 +15,8 @@ from custom_components.obs_websocket.sensor import OBSStreamServiceSensor, OBSSt
 
 from .conftest import MOCK_CONFIG, MOCK_HOST, MOCK_PORT, make_service_settings, make_stream_status
 
-SERVICE_ENTITY_ID = "sensor.obs_studio_192_168_1_100_none_2"
-STATUS_ENTITY_ID = "sensor.obs_studio_192_168_1_100_none"
+SERVICE_ENTITY_ID = "sensor.obs_studio_192_168_1_100_2"
+STATUS_ENTITY_ID = "sensor.obs_studio_192_168_1_100"
 
 
 def _make_mock_obs(req_client: MagicMock) -> MagicMock:
