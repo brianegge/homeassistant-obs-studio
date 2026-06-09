@@ -21,6 +21,6 @@ jobs:
       - name: Run tests with coverage
         run: pytest --cov=custom_components.upgrade_advisor --cov-report=xml
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@v7
+        uses: SonarSource/sonarqube-scan-action@v8
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
