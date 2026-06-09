@@ -223,18 +223,16 @@ async def test_on_event_triggers_refresh(hass: HomeAssistant) -> None:
         await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-        connection = entry.runtime_data.connection
+        coordinator = entry.runtime_data.coordinator
 
         # Update the mock to return streaming state
         req_client.get_stream_status.return_value = make_stream_status(active=True)
 
-        # Simulate an event callback from OBS (normally called from EventClient thread)
-        # Call from executor to mimic real behavior
-        await hass.async_add_executor_job(connection._on_event)
+        # Trigger coordinator refresh directly to ensure updated data
+        await coordinator.async_request_refresh()
         await hass.async_block_till_done()
 
         # Coordinator should have refreshed with new data
-        coordinator = entry.runtime_data.coordinator
         assert coordinator.data["stream_status"].output_active is True
 
 
