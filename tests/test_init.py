@@ -224,7 +224,6 @@ async def test_on_event_triggers_refresh(hass: HomeAssistant) -> None:
         await hass.async_block_till_done()
 
         coordinator = entry.runtime_data.coordinator
-        connection = entry.runtime_data.connection
 
         # Update the mock to return streaming state
         req_client.get_stream_status.return_value = make_stream_status(active=True)
