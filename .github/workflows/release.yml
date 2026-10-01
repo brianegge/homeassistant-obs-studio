@@ -49,8 +49,14 @@ jobs:
       - name: Get current version
         if: steps.daily_check.outputs.skip != 'true'
         id: current
+        # The version is interpolated into later run: scripts; accept only
+        # plain X.Y.Z so a crafted manifest value can't inject shell.
         run: |
           version=$(jq -r .version custom_components/obs_websocket/manifest.json)
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::manifest version '$version' is not X.Y.Z"
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       # main is protected, so this job cannot push a bump commit back and the
@@ -73,6 +79,10 @@ jobs:
           fi
           latest=$(gh api "repos/${{ github.repository }}/releases/latest" \
             --jq .tag_name | sed 's/^v//')
+          if [[ ! "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::latest release tag v$latest is not vX.Y.Z"
+            exit 1
+          fi
           IFS='.' read -r major minor patch <<< "$latest"
           echo "Latest tag v$latest; releasing the next patch."
           echo "version=${major}.${minor}.$((patch + 1))" >> "$GITHUB_OUTPUT"
