@@ -6,47 +6,122 @@ on:
       - main
     paths:
       - "custom_components/**"
+  # The push trigger only fires for custom_components/**, so a release that was
+  # missed (or a change outside that path that still needs shipping) has no way
+  # to be cut otherwise.
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+# Queue overlapping runs (a push and a manual run) so the second one sees the
+# first one's release in the daily and already-published checks below.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
+    # workflow_dispatch can target any branch; only main is ever released.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
+      # One release per day keeps a busy merge day from minting a tag per merge.
+      - name: Check for existing release today
+        id: daily_check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          today=$(date -u +%Y-%m-%d)
+          latest=$(gh api repos/${{ github.repository }}/releases/latest --jq .published_at 2>/dev/null || echo "")
+          if [[ "$latest" == "$today"* ]]; then
+            echo "Already released today ($latest), skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v7
+        if: steps.daily_check.outputs.skip != 'true'
         with:
           fetch-depth: 0
 
       - name: Get current version
+        if: steps.daily_check.outputs.skip != 'true'
         id: current
+        # The version is interpolated into later run: scripts; accept only
+        # plain X.Y.Z so a crafted manifest value can't inject shell.
         run: |
           version=$(jq -r .version custom_components/obs_websocket/manifest.json)
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::manifest version '$version' is not X.Y.Z"
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Bump patch version
-        id: bump
+      # main is protected, so this job cannot push a bump commit back and the
+      # manifest in the repo lags the published tags. Ship a hand-made manifest
+      # bump as-is while it has no tag yet — that is how a minor/major release
+      # is cut — and otherwise take the next patch from the LATEST PUBLISHED
+      # TAG. Basing the bump on the manifest instead would recompute the same
+      # number on every run once the manifest stops moving.
+      - name: Determine release version
+        if: steps.daily_check.outputs.skip != 'true'
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          IFS='.' read -r major minor patch <<< "${{ steps.current.outputs.version }}"
-          new_version="${major}.${minor}.$((patch + 1))"
-          echo "version=$new_version" >> "$GITHUB_OUTPUT"
+          current="${{ steps.current.outputs.version }}"
+          if ! gh release view "v$current" > /dev/null 2>&1; then
+            echo "Manifest version v$current is unreleased; shipping it as-is."
+            echo "version=$current" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          latest=$(gh api "repos/${{ github.repository }}/releases/latest" \
+            --jq .tag_name | sed 's/^v//')
+          if [[ ! "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::latest release tag v$latest is not vX.Y.Z"
+            exit 1
+          fi
+          IFS='.' read -r major minor patch <<< "$latest"
+          echo "Latest tag v$latest; releasing the next patch."
+          echo "version=${major}.${minor}.$((patch + 1))" >> "$GITHUB_OUTPUT"
 
-      - name: Update manifest for release zip
+      # Reusing a tag silently rewrites an already-published release (it moves
+      # the tag and replaces the asset), so refuse instead of overwriting.
+      - name: Fail if the release version is already published
+        if: steps.daily_check.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          jq --arg v "${{ steps.bump.outputs.version }}" '.version = $v' \
-            custom_components/obs_websocket/manifest.json > tmp.json
-          mv tmp.json custom_components/obs_websocket/manifest.json
+          if gh release view "v${{ steps.version.outputs.version }}" > /dev/null 2>&1; then
+            echo "::error::v${{ steps.version.outputs.version }} is already published; bump the version in custom_components/obs_websocket/manifest.json"
+            exit 1
+          fi
+
+      # Working tree only — this is what puts the right version inside the
+      # released zip. It is deliberately never committed; see above.
+      # Rewrite just the version line: `jq` would reformat the whole manifest
+      # (it expands the single-element arrays onto their own lines).
+      - name: Update manifest version
+        if: steps.daily_check.outputs.skip != 'true' && steps.version.outputs.version != steps.current.outputs.version
+        run: |
+          manifest=custom_components/obs_websocket/manifest.json
+          sed -i -E 's/("version": ")[^"]+(")/\1${{ steps.version.outputs.version }}\2/' "$manifest"
+          jq -e --arg v "${{ steps.version.outputs.version }}" '.version == $v' "$manifest" > /dev/null
 
       - name: Create release zip
+        if: steps.daily_check.outputs.skip != 'true'
         run: |
           cd custom_components/obs_websocket
           zip -r ../../obs-studio.zip .
 
       - name: Create GitHub Release
+        if: steps.daily_check.outputs.skip != 'true'
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: "v${{ steps.bump.outputs.version }}"
-          name: "v${{ steps.bump.outputs.version }}"
+          tag_name: "v${{ steps.version.outputs.version }}"
+          name: "v${{ steps.version.outputs.version }}"
           files: obs-studio.zip
           generate_release_notes: true
           target_commitish: ${{ github.sha }}
