@@ -14,8 +14,16 @@ on:
 permissions:
   contents: write
 
+# Queue overlapping runs (a push and a manual run) so the second one sees the
+# first one's release in the daily and already-published checks below.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
+    # workflow_dispatch can target any branch; only main is ever released.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       # One release per day keeps a busy merge day from minting a tag per merge.
