@@ -57,7 +57,7 @@ ha-obs-websocket/                # Git repo root (~/dev/ha-obs-websocket)
 The integration uses two persistent `obsws_python` connections:
 
 1. **ReqClient** - Sends requests to OBS (get_stream_status, get_stream_service_settings).
-2. **EventClient** - Subclassed to override `on_stream_state_changed`, which triggers an async coordinator refresh via `asyncio.run_coroutine_threadsafe`.
+2. **EventClient** - Subclassed to define `on_stream_state_changed`, which is registered with `callback.register()` (obsws-python only dispatches events to registered functions). The callback triggers an immediate coordinator refresh via `asyncio.run_coroutine_threadsafe`.
 
 Both clients run in the executor (blocking I/O) and are wrapped with `hass.async_add_executor_job`.
 
@@ -97,7 +97,7 @@ When the connection drops, the coordinator logs a warning, marks entities unavai
 3. Use `OBSConnection._req_client` to call OBS WebSocket methods.
 
 ### Adding new event listeners
-1. Add new `on_*` methods to the `_Events` subclass inside `OBSConnection.async_connect()`.
+1. Add new `on_*` methods to the `_Events` subclass inside `OBSConnection.async_connect()` and register each one with `events.callback.register(...)`.
 2. Trigger coordinator refresh or handle state updates in the callback.
 
 ## Dependencies

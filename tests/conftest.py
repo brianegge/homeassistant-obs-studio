@@ -68,6 +68,16 @@ def make_service_settings(
     )
 
 
+def make_event_client_class() -> type:
+    """Create a stand-in for obsws_python.EventClient, which the integration subclasses."""
+
+    def _init(self, **kwargs) -> None:
+        # obsws-python only dispatches events to functions registered via callback.register()
+        self.callback = MagicMock()
+
+    return type("EventClient", (), {"__init__": _init})
+
+
 @pytest.fixture
 def mock_config_entry(hass: HomeAssistant) -> MockConfigEntry:
     """Create and add a mock config entry."""
@@ -98,7 +108,7 @@ def mock_obsws(mock_req_client: MagicMock):
     mock_obs = MagicMock()
     mock_obs.ReqClient.return_value = mock_req_client
     # EventClient is subclassed, so provide a base class
-    mock_obs.EventClient = type("EventClient", (), {"__init__": lambda self, **kw: None})
+    mock_obs.EventClient = make_event_client_class()
 
     with patch.dict("sys.modules", {"obsws_python": mock_obs}):
         yield mock_obs

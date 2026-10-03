@@ -69,7 +69,10 @@ class OBSConnection:
                 def on_stream_state_changed(self_: Any, data: Any) -> None:
                     conn._on_event()
 
-            conn._event_client = _Events(**conn._get_kwargs())
+            events = _Events(**conn._get_kwargs())
+            # obsws-python only dispatches events to functions registered via callback.register()
+            events.callback.register(events.on_stream_state_changed)
+            conn._event_client = events
 
         await self.hass.async_add_executor_job(_connect)
 
@@ -77,8 +80,10 @@ class OBSConnection:
         """Handle OBS event from EventClient thread."""
         if self.coordinator is None:
             return
+        # Refresh right away: async_request_refresh() is debounced, which would delay
+        # the STARTED event that follows STARTING within the same window.
         asyncio.run_coroutine_threadsafe(
-            self.coordinator.async_request_refresh(),
+            self.coordinator.async_refresh(),
             self.hass.loop,
         )
 
