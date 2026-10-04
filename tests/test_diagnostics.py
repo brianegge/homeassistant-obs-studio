@@ -10,14 +10,21 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.obs_websocket.const import DOMAIN
 from custom_components.obs_websocket.diagnostics import async_get_config_entry_diagnostics
 
-from .conftest import MOCK_CONFIG, MOCK_HOST, MOCK_PORT, make_service_settings, make_stream_status
+from .conftest import (
+    MOCK_CONFIG,
+    MOCK_HOST,
+    MOCK_PORT,
+    make_event_client_class,
+    make_service_settings,
+    make_stream_status,
+)
 
 
 def _make_mock_obs(req_client: MagicMock) -> MagicMock:
     """Create a mock obsws_python module."""
     mock_obs = MagicMock()
     mock_obs.ReqClient.return_value = req_client
-    mock_obs.EventClient = type("EventClient", (), {"__init__": lambda self, **kw: None})
+    mock_obs.EventClient = make_event_client_class()
     return mock_obs
 
 
