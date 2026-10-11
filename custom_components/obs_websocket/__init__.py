@@ -12,9 +12,10 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN, HEARTBEAT_INTERVAL, PLATFORMS
+from .const import DOMAIN, EVENT_REFRESH_COOLDOWN, HEARTBEAT_INTERVAL, PLATFORMS
 
 
 @dataclass
@@ -69,7 +70,10 @@ class OBSConnection:
                 def on_stream_state_changed(self_: Any, data: Any) -> None:
                     conn._on_event()
 
-            conn._event_client = _Events(**conn._get_kwargs())
+            events = _Events(**conn._get_kwargs())
+            # obsws-python only dispatches events to functions registered via callback.register()
+            events.callback.register(events.on_stream_state_changed)
+            conn._event_client = events
 
         await self.hass.async_add_executor_job(_connect)
 
@@ -123,6 +127,12 @@ class OBSCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER,
             name=f"OBS WebSocket ({connection.host})",
             update_interval=timedelta(seconds=HEARTBEAT_INTERVAL),
+            request_refresh_debouncer=Debouncer(
+                hass,
+                _LOGGER,
+                cooldown=EVENT_REFRESH_COOLDOWN,
+                immediate=True,
+            ),
         )
         self.connection = connection
         self._was_available = True
@@ -191,5 +201,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: OBSConfigEntry) -> bool
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        await entry.runtime_data.connection.async_disconnect()
+        connection = entry.runtime_data.connection
+        # Stop late OBS events from triggering a refresh that would reconnect.
+        connection.coordinator = None
+        await entry.runtime_data.coordinator.async_shutdown()
+        await connection.async_disconnect()
     return unload_ok

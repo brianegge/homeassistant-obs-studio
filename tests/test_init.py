@@ -2,24 +2,41 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+import asyncio
+from datetime import timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.obs_websocket import OBSRuntimeData
-from custom_components.obs_websocket.const import DOMAIN
+from custom_components.obs_websocket.const import DOMAIN, EVENT_REFRESH_COOLDOWN
 
-from .conftest import MOCK_CONFIG, MOCK_HOST, MOCK_PORT, make_service_settings, make_stream_status
+from .conftest import (
+    MOCK_CONFIG,
+    MOCK_HOST,
+    MOCK_PORT,
+    make_event_client_class,
+    make_service_settings,
+    make_stream_status,
+)
 
 
 def _make_mock_obs(req_client: MagicMock) -> MagicMock:
     """Create a mock obsws_python module."""
     mock_obs = MagicMock()
     mock_obs.ReqClient.return_value = req_client
-    mock_obs.EventClient = type("EventClient", (), {"__init__": lambda self, **kw: None})
+    mock_obs.EventClient = make_event_client_class()
     return mock_obs
+
+
+async def _flush_event(hass: HomeAssistant) -> None:
+    """Let a refresh scheduled by _on_event (via run_coroutine_threadsafe) run to completion."""
+    for _ in range(10):
+        await asyncio.sleep(0)
+    await hass.async_block_till_done()
 
 
 def _make_req_client(
@@ -70,7 +87,7 @@ async def test_setup_entry_connection_failure(hass: HomeAssistant) -> None:
 
     mock_obs = MagicMock()
     mock_obs.ReqClient.side_effect = ConnectionRefusedError("Connection refused")
-    mock_obs.EventClient = type("EventClient", (), {"__init__": lambda self, **kw: None})
+    mock_obs.EventClient = make_event_client_class()
 
     with patch.dict("sys.modules", {"obsws_python": mock_obs}):
         await hass.config_entries.async_setup(entry.entry_id)
@@ -290,3 +307,134 @@ async def test_coordinator_reconnects_after_disconnect(
         await hass.async_block_till_done()
 
         assert connection.connected
+
+
+async def test_stream_state_changed_callback_is_registered(hass: HomeAssistant) -> None:
+    """Test that the stream state callback is registered with obsws-python.
+
+    obsws-python only dispatches events to functions registered via ``callback.register()``.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=MOCK_HOST,
+        data=MOCK_CONFIG.copy(),
+        unique_id=f"{MOCK_HOST}:{MOCK_PORT}",
+    )
+    entry.add_to_hass(hass)
+
+    req_client = _make_req_client()
+    mock_obs = _make_mock_obs(req_client)
+
+    with patch.dict("sys.modules", {"obsws_python": mock_obs}):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        connection = entry.runtime_data.connection
+        register = connection._event_client.callback.register
+        register.assert_called_once()
+        callback = register.call_args.args[0]
+        assert callback.__name__ == "on_stream_state_changed"
+
+        with patch.object(connection, "_on_event") as on_event:
+            callback({})
+
+        on_event.assert_called_once_with()
+
+
+async def test_on_event_requests_debounced_refresh(hass: HomeAssistant) -> None:
+    """Test that _on_event goes through the coordinator's debounced refresh."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=MOCK_HOST,
+        data=MOCK_CONFIG.copy(),
+        unique_id=f"{MOCK_HOST}:{MOCK_PORT}",
+    )
+    entry.add_to_hass(hass)
+
+    req_client = _make_req_client()
+    mock_obs = _make_mock_obs(req_client)
+
+    with patch.dict("sys.modules", {"obsws_python": mock_obs}):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        coordinator = entry.runtime_data.coordinator
+        connection = entry.runtime_data.connection
+
+        with patch.object(coordinator, "async_request_refresh", new_callable=AsyncMock) as refresh:
+            connection._on_event()
+            for _ in range(10):
+                await asyncio.sleep(0)
+
+        refresh.assert_awaited_once()
+
+
+async def test_event_burst_refreshes_immediately_then_coalesces(hass: HomeAssistant) -> None:
+    """Test STARTING then STARTED: first event refreshes now, the second after the cooldown."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=MOCK_HOST,
+        data=MOCK_CONFIG.copy(),
+        unique_id=f"{MOCK_HOST}:{MOCK_PORT}",
+    )
+    entry.add_to_hass(hass)
+
+    req_client = _make_req_client()
+    mock_obs = _make_mock_obs(req_client)
+
+    with patch.dict("sys.modules", {"obsws_python": mock_obs}):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        coordinator = entry.runtime_data.coordinator
+        connection = entry.runtime_data.connection
+        req_client.get_stream_status.reset_mock()
+
+        # STARTING: refreshed right away, OBS not active yet
+        connection._on_event()
+        await _flush_event(hass)
+        assert req_client.get_stream_status.call_count == 1
+        assert coordinator.data["stream_status"].output_active is False
+
+        # STARTED arrives within the cooldown: deferred, not dropped
+        req_client.get_stream_status.return_value = make_stream_status(active=True)
+        connection._on_event()
+        await _flush_event(hass)
+        assert req_client.get_stream_status.call_count == 1
+
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=EVENT_REFRESH_COOLDOWN + 0.1))
+        await hass.async_block_till_done()
+
+        assert req_client.get_stream_status.call_count == 2
+        assert coordinator.data["stream_status"].output_active is True
+
+
+async def test_on_event_after_unload_does_not_reconnect(hass: HomeAssistant) -> None:
+    """Test that a late OBS event after unload does not refresh or reconnect."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=MOCK_HOST,
+        data=MOCK_CONFIG.copy(),
+        unique_id=f"{MOCK_HOST}:{MOCK_PORT}",
+    )
+    entry.add_to_hass(hass)
+
+    req_client = _make_req_client()
+    mock_obs = _make_mock_obs(req_client)
+
+    with patch.dict("sys.modules", {"obsws_python": mock_obs}):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        connection = entry.runtime_data.connection
+
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+        assert connection.coordinator is None
+
+        mock_obs.ReqClient.reset_mock()
+        connection._on_event()
+        await _flush_event(hass)
+
+        mock_obs.ReqClient.assert_not_called()
+        assert not connection.connected
