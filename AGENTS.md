@@ -50,6 +50,7 @@ ha-obs-websocket/                # Git repo root (~/dev/ha-obs-websocket)
 - `DEFAULT_HOST = "localhost"`
 - `DEFAULT_PORT = 4455`
 - `HEARTBEAT_INTERVAL = 60` (seconds)
+- `EVENT_REFRESH_COOLDOWN = 0.5` (seconds)
 - `PLATFORMS = ["sensor"]`
 
 ## Connection Architecture
@@ -57,7 +58,7 @@ ha-obs-websocket/                # Git repo root (~/dev/ha-obs-websocket)
 The integration uses two persistent `obsws_python` connections:
 
 1. **ReqClient** - Sends requests to OBS (get_stream_status, get_stream_service_settings).
-2. **EventClient** - Subclassed to define `on_stream_state_changed`, which is registered with `callback.register()` (obsws-python only dispatches events to registered functions). The callback triggers an immediate coordinator refresh via `asyncio.run_coroutine_threadsafe`.
+2. **EventClient** - Subclassed to define `on_stream_state_changed`, which is registered with `callback.register()` (obsws-python only dispatches events to registered functions). The callback calls `coordinator.async_request_refresh()` via `asyncio.run_coroutine_threadsafe`. The coordinator's debouncer (`immediate=True`, `EVENT_REFRESH_COOLDOWN`) refreshes on the first event and coalesces a burst (STARTING then STARTED) into one trailing refresh.
 
 Both clients run in the executor (blocking I/O) and are wrapped with `hass.async_add_executor_job`.
 

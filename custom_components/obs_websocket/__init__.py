@@ -12,9 +12,10 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN, HEARTBEAT_INTERVAL, PLATFORMS
+from .const import DOMAIN, EVENT_REFRESH_COOLDOWN, HEARTBEAT_INTERVAL, PLATFORMS
 
 
 @dataclass
@@ -80,10 +81,8 @@ class OBSConnection:
         """Handle OBS event from EventClient thread."""
         if self.coordinator is None:
             return
-        # Refresh right away: async_request_refresh() is debounced, which would delay
-        # the STARTED event that follows STARTING within the same window.
         asyncio.run_coroutine_threadsafe(
-            self.coordinator.async_refresh(),
+            self.coordinator.async_request_refresh(),
             self.hass.loop,
         )
 
@@ -128,6 +127,12 @@ class OBSCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER,
             name=f"OBS WebSocket ({connection.host})",
             update_interval=timedelta(seconds=HEARTBEAT_INTERVAL),
+            request_refresh_debouncer=Debouncer(
+                hass,
+                _LOGGER,
+                cooldown=EVENT_REFRESH_COOLDOWN,
+                immediate=True,
+            ),
         )
         self.connection = connection
         self._was_available = True
@@ -196,5 +201,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: OBSConfigEntry) -> bool
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        await entry.runtime_data.connection.async_disconnect()
+        connection = entry.runtime_data.connection
+        # Stop late OBS events from triggering a refresh that would reconnect.
+        connection.coordinator = None
+        await entry.runtime_data.coordinator.async_shutdown()
+        await connection.async_disconnect()
     return unload_ok
