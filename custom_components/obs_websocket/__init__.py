@@ -109,7 +109,7 @@ class OBSConnection:
                 if client is None:
                     raise RuntimeError("OBS WebSocket connection unavailable")
                 return await self.hass.async_add_executor_job(func, client)
-            except Exception as err:  # noqa: BLE001 - reconnect on any failure
+            except Exception as err:  # reconnect on any failure
                 last_err = err
                 await self.async_disconnect()
         assert last_err is not None
