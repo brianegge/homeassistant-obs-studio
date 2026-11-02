@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any
+from typing import Any, TypeVar
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -29,6 +30,8 @@ class OBSRuntimeData:
 type OBSConfigEntry = ConfigEntry[OBSRuntimeData]
 
 _LOGGER = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 
 class OBSConnection:
@@ -86,23 +89,50 @@ class OBSConnection:
             self.hass.loop,
         )
 
+    async def _async_request(self, func: Callable[[Any], _T]) -> _T:
+        """Run a ReqClient call, reconnecting once if the socket is stale.
+
+        The request socket is long-lived and can go half-open while idle:
+        the client object still exists (so ``connected`` is ``True``) but the
+        call hangs until its timeout or fails outright. ``connected`` cannot
+        tell a live socket from a dead one, so instead of trusting it we run
+        the call, and on any failure drop the client, reconnect, and retry
+        once. That turns a stale socket into a completed request rather than a
+        command that is silently dropped while the sensors still read fine.
+        """
+        last_err: Exception | None = None
+        for _attempt in range(2):
+            try:
+                if self._req_client is None:
+                    await self.async_connect()
+                client = self._req_client
+                if client is None:
+                    raise RuntimeError("OBS WebSocket connection unavailable")
+                return await self.hass.async_add_executor_job(func, client)
+            except Exception as err:  # noqa: BLE001 - reconnect on any failure
+                last_err = err
+                await self.async_disconnect()
+        assert last_err is not None
+        raise last_err
+
     async def async_fetch_data(self) -> dict[str, Any]:
         """Fetch current state using the persistent ReqClient."""
 
-        def _fetch() -> dict[str, Any]:
-            status = self._req_client.get_stream_status()
-            service = self._req_client.get_stream_service_settings()
-            return {"stream_status": status, "service_settings": service}
+        def _fetch(client: Any) -> dict[str, Any]:
+            return {
+                "stream_status": client.get_stream_status(),
+                "service_settings": client.get_stream_service_settings(),
+            }
 
-        return await self.hass.async_add_executor_job(_fetch)
+        return await self._async_request(_fetch)
 
     async def async_start_stream(self) -> None:
         """Start streaming in OBS."""
-        await self.hass.async_add_executor_job(self._req_client.start_stream)
+        await self._async_request(lambda client: client.start_stream())
 
     async def async_stop_stream(self) -> None:
         """Stop streaming in OBS."""
-        await self.hass.async_add_executor_job(self._req_client.stop_stream)
+        await self._async_request(lambda client: client.stop_stream())
 
     async def async_disconnect(self) -> None:
         """Disconnect both clients."""
@@ -139,8 +169,8 @@ class OBSCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
-            if not self.connection.connected:
-                await self.connection.async_connect()
+            # async_fetch_data connects if needed and reconnects on a stale
+            # socket, so no separate connect guard is required here.
             data = await self.connection.async_fetch_data()
         except Exception as err:
             await self.connection.async_disconnect()
