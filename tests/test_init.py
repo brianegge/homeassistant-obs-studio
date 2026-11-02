@@ -6,6 +6,7 @@ import asyncio
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
@@ -437,4 +438,71 @@ async def test_on_event_after_unload_does_not_reconnect(hass: HomeAssistant) -> 
         await _flush_event(hass)
 
         mock_obs.ReqClient.assert_not_called()
+        assert not connection.connected
+
+
+async def test_command_reconnects_on_stale_socket(hass: HomeAssistant) -> None:
+    """A command on a half-open request socket reconnects and retries once.
+
+    The first client raises as a stale socket would; the reconnect creates a
+    fresh client that carries the command through.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=MOCK_HOST,
+        data=MOCK_CONFIG.copy(),
+        unique_id=f"{MOCK_HOST}:{MOCK_PORT}",
+    )
+    entry.add_to_hass(hass)
+
+    stale = _make_req_client()
+    stale.start_stream.side_effect = TimeoutError("stale socket")
+    fresh = _make_req_client()
+
+    mock_obs = MagicMock()
+    mock_obs.ReqClient.side_effect = [stale, fresh]
+    mock_obs.EventClient = make_event_client_class()
+
+    with patch.dict("sys.modules", {"obsws_python": mock_obs}):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        connection = entry.runtime_data.connection
+        # Setup created the stale client; the command must survive its failure.
+        await connection.async_start_stream()
+
+        stale.start_stream.assert_called_once()
+        fresh.start_stream.assert_called_once()
+        assert connection.connected
+
+
+async def test_command_raises_when_reconnect_also_fails(hass: HomeAssistant) -> None:
+    """If the retry's fresh client also fails, the error propagates and the client is dropped."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=MOCK_HOST,
+        data=MOCK_CONFIG.copy(),
+        unique_id=f"{MOCK_HOST}:{MOCK_PORT}",
+    )
+    entry.add_to_hass(hass)
+
+    first = _make_req_client()
+    first.stop_stream.side_effect = TimeoutError("stale socket")
+    second = _make_req_client()
+    second.stop_stream.side_effect = TimeoutError("still down")
+
+    mock_obs = MagicMock()
+    mock_obs.ReqClient.side_effect = [first, second]
+    mock_obs.EventClient = make_event_client_class()
+
+    with patch.dict("sys.modules", {"obsws_python": mock_obs}):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        connection = entry.runtime_data.connection
+        with pytest.raises(TimeoutError):
+            await connection.async_stop_stream()
+
+        first.stop_stream.assert_called_once()
+        second.stop_stream.assert_called_once()
         assert not connection.connected
