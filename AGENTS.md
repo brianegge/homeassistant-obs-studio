@@ -17,7 +17,9 @@ ha-obs-websocket/                # Git repo root (~/dev/ha-obs-websocket)
 │       ├── icons.json           # Icon translations (per-state icons for sensors)
 │       ├── manifest.json        # Integration metadata and dependencies
 │       ├── sensor.py            # Sensor entities: OBSStreamStatusSensor, OBSStreamServiceSensor
-│       └── strings.json         # UI localization: config flow, entity names/states, exceptions
+│       ├── strings.json         # UI localization: config flow, entity names/states, exceptions
+│       └── translations/
+│           └── en.json          # Copy of strings.json; HA only loads translations/ for custom integrations
 ├── tests/                       # Test suite
 │   ├── conftest.py
 │   ├── test_config_flow.py
@@ -76,7 +78,7 @@ When the connection drops, the coordinator logs a warning, marks entities unavai
 - Config flow unique ID is `{host}:{port}` to prevent duplicate entries.
 - The `obsws_python` library is imported lazily inside functions that run in the executor.
 - Icons are defined in `icons.json`, not hardcoded as `_attr_icon`.
-- All user-facing strings go in `strings.json` with translation keys.
+- All user-facing strings go in `strings.json` with translation keys, and must be copied to `translations/en.json` (Home Assistant only reads `translations/` for custom integrations; a test enforces the two match).
 
 ## Adding New Functionality
 
@@ -84,7 +86,7 @@ When the connection drops, the coordinator logs a warning, marks entities unavai
 1. Subclass `OBSSensorBase` in `sensor.py`.
 2. Set `_attr_translation_key` and `_attr_unique_id`.
 3. Add it to the `async_setup_entry` entity list in `sensor.py`.
-4. Add name/state translations to `strings.json` and icons to `icons.json`.
+4. Add name/state translations to `strings.json` (and `translations/en.json`) and icons to `icons.json`.
 5. If it needs new data, update `OBSConnection.async_fetch_data()` in `__init__.py`.
 
 ### Adding a new platform (e.g. switch, button)
