@@ -73,6 +73,14 @@
       },
       "stream_service": {
         "name": "Stream service"
+      },
+      "record_status": {
+        "name": "Record status",
+        "state": {
+          "idle": "Idle",
+          "recording": "Recording",
+          "paused": "Paused"
+        }
       }
     },
     "button": {

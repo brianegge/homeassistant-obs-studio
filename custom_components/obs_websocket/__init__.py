@@ -73,9 +73,13 @@ class OBSConnection:
                 def on_stream_state_changed(self_: Any, data: Any) -> None:
                     conn._on_event()
 
+                def on_record_state_changed(self_: Any, data: Any) -> None:
+                    conn._on_event()
+
             events = _Events(**conn._get_kwargs())
             # obsws-python only dispatches events to functions registered via callback.register()
             events.callback.register(events.on_stream_state_changed)
+            events.callback.register(events.on_record_state_changed)
             conn._event_client = events
 
         await self.hass.async_add_executor_job(_connect)
@@ -121,6 +125,7 @@ class OBSConnection:
         def _fetch(client: Any) -> dict[str, Any]:
             return {
                 "stream_status": client.get_stream_status(),
+                "record_status": client.get_record_status(),
                 "service_settings": client.get_stream_service_settings(),
             }
 

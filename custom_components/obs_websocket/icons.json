@@ -11,6 +11,14 @@
       },
       "stream_service": {
         "default": "mdi:cog-play"
+      },
+      "record_status": {
+        "default": "mdi:record-rec",
+        "state": {
+          "recording": "mdi:record-rec",
+          "paused": "mdi:pause-circle",
+          "idle": "mdi:record"
+        }
       }
     },
     "button": {

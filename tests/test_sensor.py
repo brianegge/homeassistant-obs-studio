@@ -11,19 +11,25 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.obs_websocket.const import DOMAIN
-from custom_components.obs_websocket.sensor import OBSStreamServiceSensor, OBSStreamStatusSensor
+from custom_components.obs_websocket.sensor import (
+    OBSRecordStatusSensor,
+    OBSStreamServiceSensor,
+    OBSStreamStatusSensor,
+)
 
 from .conftest import (
     MOCK_CONFIG,
     MOCK_HOST,
     MOCK_PORT,
     make_event_client_class,
+    make_record_status,
     make_service_settings,
     make_stream_status,
 )
 
 SERVICE_ENTITY_ID = "sensor.obs_studio_192_168_1_100_2"
 STATUS_ENTITY_ID = "sensor.obs_studio_192_168_1_100"
+RECORD_ENTITY_ID = "sensor.obs_studio_192_168_1_100_3"
 
 
 def _make_mock_obs(req_client: MagicMock) -> MagicMock:
@@ -46,6 +52,8 @@ def _make_req_client(
     output_congestion: float = 0.0,
     service_type: str = "rtmp_common",
     service_settings: dict | None = None,
+    recording: bool = False,
+    record_paused: bool = False,
 ) -> MagicMock:
     """Create a mock ReqClient with configurable state."""
     client = MagicMock()
@@ -58,6 +66,13 @@ def _make_req_client(
         output_skipped_frames=output_skipped_frames,
         output_total_frames=output_total_frames,
         output_congestion=output_congestion,
+    )
+    client.get_record_status.return_value = make_record_status(
+        active=recording,
+        paused=record_paused,
+        output_bytes=2048 if recording else 0,
+        output_duration=30000 if recording else 0,
+        output_timecode="00:00:30.000" if recording else "00:00:00.000",
     )
     client.get_stream_service_settings.return_value = make_service_settings(
         service_type=service_type,
@@ -222,6 +237,7 @@ async def test_sensor_native_value_none_when_no_data(
     # Directly test sensor methods with None data
     status_sensor = OBSStreamStatusSensor(coordinator, entry)
     service_sensor = OBSStreamServiceSensor(coordinator, entry)
+    record_sensor = OBSRecordStatusSensor(coordinator, entry)
 
     # Force coordinator data to None
     coordinator.data = None
@@ -230,6 +246,8 @@ async def test_sensor_native_value_none_when_no_data(
     assert status_sensor.extra_state_attributes == {}
     assert service_sensor.native_value is None
     assert service_sensor.extra_state_attributes == {}
+    assert record_sensor.native_value is None
+    assert record_sensor.extra_state_attributes == {}
 
 
 async def test_service_sensor_entity_category(hass: HomeAssistant) -> None:
@@ -241,3 +259,47 @@ async def test_service_sensor_entity_category(hass: HomeAssistant) -> None:
     entity = ent_reg.async_get(SERVICE_ENTITY_ID)
     assert entity is not None
     assert entity.entity_category == EntityCategory.DIAGNOSTIC
+
+
+async def test_record_status_idle(hass: HomeAssistant) -> None:
+    """Test record status sensor shows idle when not recording."""
+    req_client = _make_req_client(recording=False)
+    await _setup_integration(hass, req_client)
+
+    state = hass.states.get(RECORD_ENTITY_ID)
+    assert state is not None
+    assert state.state == "idle"
+    assert state.attributes["output_bytes"] == 0
+
+
+async def test_record_status_recording(hass: HomeAssistant) -> None:
+    """Test record status sensor shows recording, independent of streaming."""
+    req_client = _make_req_client(recording=True)
+    await _setup_integration(hass, req_client)
+
+    state = hass.states.get(RECORD_ENTITY_ID)
+    assert state is not None
+    assert state.state == "recording"
+    assert state.attributes["output_bytes"] == 2048
+    assert state.attributes["output_duration"] == 30000
+    assert state.attributes["output_timecode"] == "00:00:30.000"
+    assert hass.states.get(STATUS_ENTITY_ID).state == "idle"
+
+
+async def test_record_status_paused(hass: HomeAssistant) -> None:
+    """Test record status sensor shows paused."""
+    req_client = _make_req_client(recording=True, record_paused=True)
+    await _setup_integration(hass, req_client)
+
+    state = hass.states.get(RECORD_ENTITY_ID)
+    assert state is not None
+    assert state.state == "paused"
+
+
+async def test_streaming_and_recording_together(hass: HomeAssistant) -> None:
+    """Test both sensors report active state when streaming and recording at once."""
+    req_client = _make_req_client(active=True, recording=True)
+    await _setup_integration(hass, req_client)
+
+    assert hass.states.get(STATUS_ENTITY_ID).state == "streaming"
+    assert hass.states.get(RECORD_ENTITY_ID).state == "recording"
