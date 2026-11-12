@@ -198,7 +198,7 @@ automation:
 | Sensors show "unavailable" | OBS may have been closed or the network connection was lost. The integration will automatically reconnect within 60 seconds when OBS becomes reachable. |
 | State doesn't update immediately | Verify OBS is version 28+. Older versions may not emit WebSocket v5 events. The fallback poll interval is 60 seconds. |
 | Integration won't load after HA update | Check the Home Assistant logs for errors. You may need to update the `obsws-python` dependency or the integration code. |
-| Password changed in OBS | Use **Settings > Devices & Services > OBS WebSocket > (three-dot menu) > Re-authenticate** to update the password. |
+| Password changed in OBS | Home Assistant shows a **Re-authenticate** prompt under **Settings > Devices & Services**; enter the new password there. To change the host or port as well, use **(three-dot menu) > Reconfigure**. |
 
 ## Dependencies
 

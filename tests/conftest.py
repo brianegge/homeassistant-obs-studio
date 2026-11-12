@@ -32,6 +32,14 @@ MOCK_CONFIG = {
 }
 
 
+class OBSSDKError(Exception):
+    """Stand-in for obsws_python.error.OBSSDKError (matched by class name)."""
+
+
+# The error obsws-python raises when OBS closes the socket because the password is wrong.
+WRONG_PASSWORD_ERROR = OBSSDKError("failed to identify client with the server, please check connection settings")
+
+
 def make_stream_status(
     *,
     active: bool = False,

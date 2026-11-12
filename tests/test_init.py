@@ -21,6 +21,7 @@ from .conftest import (
     MOCK_CONFIG,
     MOCK_HOST,
     MOCK_PORT,
+    WRONG_PASSWORD_ERROR,
     make_event_client_class,
     make_service_settings,
     make_stream_status,
@@ -520,3 +521,64 @@ def test_translations_match_strings() -> None:
     strings = json.loads((component / "strings.json").read_text(encoding="utf-8"))
     en = json.loads((component / "translations" / "en.json").read_text(encoding="utf-8"))
     assert en == strings
+
+
+async def test_setup_entry_auth_failure_starts_reauth(hass: HomeAssistant) -> None:
+    """Test a rejected password at setup fails setup and starts the reauth flow."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=MOCK_HOST,
+        data=MOCK_CONFIG.copy(),
+        unique_id=f"{MOCK_HOST}:{MOCK_PORT}",
+    )
+    entry.add_to_hass(hass)
+
+    mock_obs = MagicMock()
+    mock_obs.ReqClient.side_effect = WRONG_PASSWORD_ERROR
+    mock_obs.EventClient = make_event_client_class()
+
+    with patch.dict("sys.modules", {"obsws_python": mock_obs}):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    flows = hass.config_entries.flow.async_progress()
+    assert len(flows) == 1
+    assert flows[0]["context"]["source"] == "reauth"
+    assert flows[0]["context"]["entry_id"] == entry.entry_id
+
+
+async def test_password_change_while_running_starts_reauth(hass: HomeAssistant) -> None:
+    """Test a password rejected on reconnect starts the reauth flow without retrying."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=MOCK_HOST,
+        data=MOCK_CONFIG.copy(),
+        unique_id=f"{MOCK_HOST}:{MOCK_PORT}",
+    )
+    entry.add_to_hass(hass)
+
+    req_client = _make_req_client()
+    mock_obs = _make_mock_obs(req_client)
+
+    with patch.dict("sys.modules", {"obsws_python": mock_obs}):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert entry.state is ConfigEntryState.LOADED
+
+        # OBS restarts with a new password: the stale socket fails, and reconnecting is rejected.
+        req_client.get_stream_status.side_effect = ConnectionError("Lost")
+        mock_obs.ReqClient.reset_mock()
+        mock_obs.ReqClient.side_effect = WRONG_PASSWORD_ERROR
+
+        await entry.runtime_data.coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+        # One reconnect attempt; an auth failure is not retried.
+        assert mock_obs.ReqClient.call_count == 1
+        assert not entry.runtime_data.connection.connected
+
+    assert entry.runtime_data.coordinator.last_update_success is False
+    flows = hass.config_entries.flow.async_progress()
+    assert len(flows) == 1
+    assert flows[0]["context"]["source"] == "reauth"
