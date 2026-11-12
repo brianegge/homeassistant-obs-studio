@@ -4,8 +4,10 @@ rules:
     status: exempt
     comment: This integration does not provide additional actions.
   appropriate-polling:
-    status: exempt
-    comment: This integration uses local_push via WebSocket.
+    status: done
+    comment: >
+      State is pushed via WebSocket events; a 60s heartbeat poll is a fallback
+      for missed events and to detect a dropped connection.
   brands: done
   common-modules: done
   config-flow-test-coverage: done
@@ -27,8 +29,8 @@ rules:
 
   # Silver
   action-exceptions:
-    status: exempt
-    comment: This integration does not provide additional actions.
+    status: done
+    comment: Start/stop stream buttons raise HomeAssistantError with a translation key on failure.
   config-entry-unloading: done
   docs-configuration-parameters: done
   docs-installation-parameters: done
@@ -36,5 +38,44 @@ rules:
   integration-owner: done
   log-when-unavailable: done
   parallel-updates: done
-  reauthentication-flow: done
+  reauthentication-flow:
+    status: todo
+    comment: >
+      The reauth flow exists, but nothing raises ConfigEntryAuthFailed, so it is
+      never started; a wrong password only marks entities unavailable.
   test-coverage: done
+
+  # Gold
+  devices: done
+  diagnostics: done
+  discovery-update-info:
+    status: exempt
+    comment: OBS does not support discovery.
+  discovery:
+    status: exempt
+    comment: The OBS WebSocket server does not advertise itself via mDNS, SSDP, or DHCP.
+  docs-data-update: done
+  docs-examples: done
+  docs-known-limitations: done
+  docs-supported-devices: done
+  docs-supported-functions: done
+  docs-troubleshooting: done
+  docs-use-cases: done
+  dynamic-devices:
+    status: exempt
+    comment: Each config entry represents a single OBS instance with one device.
+  entity-category: done
+  entity-device-class: done
+  entity-disabled-by-default: done
+  entity-translations: done
+  exception-translations: done
+  icon-translations: done
+  reconfiguration-flow: done
+  repair-issues:
+    status: exempt
+    comment: >
+      No user-actionable issues beyond connection settings, which are handled by
+      the reconfigure and reauth flows.
+  stale-devices:
+    status: exempt
+    comment: The single device is removed together with its config entry.
