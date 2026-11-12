@@ -204,7 +204,7 @@ automation:
 ## Known Limitations
 
 - **Synchronous library** - The underlying `obsws-python` library uses threads rather than asyncio, so all calls are wrapped with `async_add_executor_job`.
-- **Single stream output** - Only the primary stream output is monitored. Recording status and virtual cam status are not currently tracked.
+- **Single stream output** - Only the primary stream output is monitored. Virtual cam and replay buffer status are not currently tracked.
 - **No auto-discovery** - You must manually enter the OBS host and port; the integration cannot discover OBS instances on the network.
 - **No device firmware version** - The OBS version is not currently reported in device info.
 
