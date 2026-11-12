@@ -16,7 +16,7 @@
       },
       "reauth_confirm": {
         "title": "Re-authenticate OBS WebSocket",
-        "description": "The connection to OBS failed. Please update the password.",
+        "description": "OBS rejected the WebSocket password. Enter the current password from Tools > WebSocket Server Settings in OBS.",
         "data": {
           "password": "Password"
         },
@@ -39,7 +39,8 @@
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to OBS WebSocket"
+      "cannot_connect": "Failed to connect to OBS WebSocket",
+      "invalid_auth": "Invalid password"
     },
     "abort": {
       "already_configured": "This OBS instance is already configured",
@@ -59,6 +60,9 @@
     },
     "stop_stream_failed": {
       "message": "Failed to stop streaming on OBS at {host}: {error}"
+    },
+    "invalid_auth": {
+      "message": "OBS WebSocket at {host} rejected the password"
     }
   },
   "entity": {

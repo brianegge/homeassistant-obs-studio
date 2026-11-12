@@ -38,11 +38,7 @@ rules:
   integration-owner: done
   log-when-unavailable: done
   parallel-updates: done
-  reauthentication-flow:
-    status: todo
-    comment: >
-      The reauth flow exists, but nothing raises ConfigEntryAuthFailed, so it is
-      never started; a wrong password only marks entities unavailable.
+  reauthentication-flow: done
   test-coverage: done
 
   # Gold

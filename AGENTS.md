@@ -14,6 +14,7 @@ ha-obs-websocket/                # Git repo root (~/dev/ha-obs-websocket)
 │       ├── config_flow.py       # Config flow: user setup, reauth, reconfigure
 │       ├── const.py             # Constants: DOMAIN, defaults, HEARTBEAT_INTERVAL, PLATFORMS
 │       ├── diagnostics.py       # Diagnostics support
+│       ├── errors.py            # OBSAuthError and is_auth_error (detects a rejected password)
 │       ├── icons.json           # Icon translations (per-state icons for sensors)
 │       ├── manifest.json        # Integration metadata and dependencies
 │       ├── sensor.py            # Sensor entities: OBSStreamStatusSensor, OBSStreamServiceSensor
@@ -41,6 +42,7 @@ ha-obs-websocket/                # Git repo root (~/dev/ha-obs-websocket)
 | `OBSConfigEntry` | `__init__.py` | Type alias: `ConfigEntry[OBSRuntimeData]` |
 | `OBSConnection` | `__init__.py` | Manages persistent ReqClient + EventClient WebSocket connections |
 | `OBSCoordinator` | `__init__.py` | DataUpdateCoordinator with 60s heartbeat, event-driven refresh, availability logging |
+| `OBSAuthError` | `errors.py` | Raised when OBS rejects the password; becomes `ConfigEntryAuthFailed` (starts reauth) |
 | `OBSWebSocketConfigFlow` | `config_flow.py` | Config flow with user setup, reauth, and reconfigure steps |
 | `OBSSensorBase` | `sensor.py` | Base class with `has_entity_name`, `DeviceInfo` |
 | `OBSStreamStatusSensor` | `sensor.py` | Stream state sensor (streaming/reconnecting/idle) |
@@ -66,6 +68,8 @@ The integration uses two persistent `obsws_python` connections:
 Both clients run in the executor (blocking I/O) and are wrapped with `hass.async_add_executor_job`.
 
 When the connection drops, the coordinator logs a warning, marks entities unavailable (via `UpdateFailed`), and reconnects on the next poll cycle.
+
+If OBS rejects the password (at setup or on reconnect), `OBSConnection` raises `OBSAuthError`, which setup and the coordinator turn into `ConfigEntryAuthFailed` so Home Assistant starts the reauth flow. obsws-python reports this as a generic `OBSSDKError`, so `is_auth_error()` matches on its message; auth failures are not retried.
 
 ## Conventions
 

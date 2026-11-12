@@ -5,14 +5,25 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.obs_websocket.const import DOMAIN
+from custom_components.obs_websocket.errors import OBSAuthError
 
-from .conftest import MOCK_CONFIG, MOCK_HOST, MOCK_NEW_PASSWORD, MOCK_PASSWORD, MOCK_PORT, MOCK_WRONG_PASSWORD
+from .conftest import (
+    MOCK_CONFIG,
+    MOCK_HOST,
+    MOCK_NEW_PASSWORD,
+    MOCK_PASSWORD,
+    MOCK_PORT,
+    MOCK_WRONG_PASSWORD,
+    WRONG_PASSWORD_ERROR,
+    OBSSDKError,
+)
 
 
 async def test_user_flow_shows_form(hass: HomeAssistant) -> None:
@@ -216,3 +227,84 @@ async def test_test_connection_failure(hass: HomeAssistant) -> None:
             raise AssertionError("Should have raised")
         except ConnectionRefusedError:
             pass
+
+
+async def test_user_flow_invalid_auth(hass: HomeAssistant) -> None:
+    """Test user flow shows invalid_auth when OBS rejects the password."""
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+
+    with patch(
+        "custom_components.obs_websocket.config_flow._test_connection",
+        side_effect=OBSAuthError("rejected"),
+    ):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_CONFIG)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_auth"}
+
+
+async def test_reauth_flow_invalid_auth(hass: HomeAssistant, mock_config_entry: MockConfigEntry) -> None:
+    """Test reauth flow shows invalid_auth for a wrong password."""
+    result = await mock_config_entry.start_reauth_flow(hass)
+
+    with patch(
+        "custom_components.obs_websocket.config_flow._test_connection",
+        side_effect=OBSAuthError("rejected"),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={"password": MOCK_WRONG_PASSWORD},  # NOSONAR
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_auth"}
+
+
+async def test_reconfigure_flow_invalid_auth(hass: HomeAssistant, mock_config_entry: MockConfigEntry) -> None:
+    """Test reconfigure flow shows invalid_auth for a wrong password."""
+    result = await mock_config_entry.start_reconfigure_flow(hass)
+
+    with patch(
+        "custom_components.obs_websocket.config_flow._test_connection",
+        side_effect=OBSAuthError("rejected"),
+    ):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input=MOCK_CONFIG)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_auth"}
+
+
+@pytest.mark.parametrize(
+    "error",
+    [WRONG_PASSWORD_ERROR, OBSSDKError("authentication enabled but no password provided")],
+)
+async def test_test_connection_auth_failure(hass: HomeAssistant, error: Exception) -> None:
+    """Test _test_connection maps obsws-python auth errors to OBSAuthError."""
+    mock_obs = MagicMock()
+    mock_obs.ReqClient.side_effect = error
+
+    with patch.dict("sys.modules", {"obsws_python": mock_obs}):
+        from custom_components.obs_websocket.config_flow import _test_connection
+
+        with pytest.raises(OBSAuthError):
+            await _test_connection(hass, MOCK_HOST, MOCK_PORT, MOCK_PASSWORD)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        OBSSDKError("failed to identify client with the server, expected response with OpCode 2"),
+        ConnectionError("failed to identify client with the server, please check connection settings"),
+    ],
+)
+async def test_test_connection_non_auth_errors_pass_through(hass: HomeAssistant, error: Exception) -> None:
+    """Test other errors are not mistaken for a rejected password."""
+    mock_obs = MagicMock()
+    mock_obs.ReqClient.side_effect = error
+
+    with patch.dict("sys.modules", {"obsws_python": mock_obs}):
+        from custom_components.obs_websocket.config_flow import _test_connection
+
+        with pytest.raises(type(error)) as exc_info:
+            await _test_connection(hass, MOCK_HOST, MOCK_PORT, MOCK_PASSWORD)
+    assert not isinstance(exc_info.value, OBSAuthError)

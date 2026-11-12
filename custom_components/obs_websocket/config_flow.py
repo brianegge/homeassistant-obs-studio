@@ -10,6 +10,7 @@ from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import HomeAssistant
 
 from .const import DEFAULT_HOST, DEFAULT_PORT, DOMAIN
+from .errors import OBSAuthError, is_auth_error
 
 
 async def _test_connection(hass: HomeAssistant, host: str, port: int, password: str) -> None:
@@ -24,7 +25,12 @@ async def _test_connection(hass: HomeAssistant, host: str, port: int, password: 
         client.get_version()
         client.disconnect()
 
-    await hass.async_add_executor_job(_connect)
+    try:
+        await hass.async_add_executor_job(_connect)
+    except Exception as err:
+        if is_auth_error(err):
+            raise OBSAuthError(str(err)) from err
+        raise
 
 
 class OBSWebSocketConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -43,6 +49,8 @@ class OBSWebSocketConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             try:
                 await _test_connection(self.hass, host, port, password)
+            except OBSAuthError:
+                errors["base"] = "invalid_auth"
             except Exception:
                 errors["base"] = "cannot_connect"
             else:
@@ -83,6 +91,8 @@ class OBSWebSocketConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     reauth_entry.data["port"],
                     password,
                 )
+            except OBSAuthError:
+                errors["base"] = "invalid_auth"
             except Exception:
                 errors["base"] = "cannot_connect"
             else:
@@ -113,6 +123,8 @@ class OBSWebSocketConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             try:
                 await _test_connection(self.hass, host, port, password)
+            except OBSAuthError:
+                errors["base"] = "invalid_auth"
             except Exception:
                 errors["base"] = "cannot_connect"
             else:

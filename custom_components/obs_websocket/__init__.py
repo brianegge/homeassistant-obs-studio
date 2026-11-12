@@ -12,11 +12,12 @@ from typing import Any, TypeVar
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DOMAIN, EVENT_REFRESH_COOLDOWN, HEARTBEAT_INTERVAL, PLATFORMS
+from .errors import OBSAuthError, is_auth_error
 
 
 @dataclass
@@ -82,7 +83,12 @@ class OBSConnection:
             events.callback.register(events.on_record_state_changed)
             conn._event_client = events
 
-        await self.hass.async_add_executor_job(_connect)
+        try:
+            await self.hass.async_add_executor_job(_connect)
+        except Exception as err:
+            if is_auth_error(err):
+                raise OBSAuthError(str(err)) from err
+            raise
 
     def _on_event(self) -> None:
         """Handle OBS event from EventClient thread."""
@@ -113,6 +119,10 @@ class OBSConnection:
                 if client is None:
                     raise RuntimeError("OBS WebSocket connection unavailable")
                 return await self.hass.async_add_executor_job(func, client)
+            except OBSAuthError:
+                # A wrong password won't be fixed by retrying.
+                await self.async_disconnect()
+                raise
             except Exception as err:  # reconnect on any failure
                 last_err = err
                 await self.async_disconnect()
@@ -177,6 +187,14 @@ class OBSCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # async_fetch_data connects if needed and reconnects on a stale
             # socket, so no separate connect guard is required here.
             data = await self.connection.async_fetch_data()
+        except OBSAuthError as err:
+            # Marks entities unavailable and starts the reauth flow.
+            self._was_available = False
+            raise ConfigEntryAuthFailed(
+                translation_domain=DOMAIN,
+                translation_key="invalid_auth",
+                translation_placeholders={"host": self.connection.host},
+            ) from err
         except Exception as err:
             await self.connection.async_disconnect()
             if self._was_available:
@@ -212,6 +230,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: OBSConfigEntry) -> bool:
 
     try:
         await connection.async_connect()
+    except OBSAuthError as err:
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN,
+            translation_key="invalid_auth",
+            translation_placeholders={"host": entry.data["host"]},
+        ) from err
     except Exception as err:
         raise ConfigEntryNotReady(
             translation_domain=DOMAIN,
