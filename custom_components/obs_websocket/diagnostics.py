@@ -32,6 +32,15 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: OBSConf
                 "output_total_frames": getattr(stream_status, "output_total_frames", None),
                 "output_congestion": getattr(stream_status, "output_congestion", None),
             }
+        record_status = coordinator.data.get("record_status")
+        if record_status:
+            coordinator_data["record_status"] = {
+                "output_active": getattr(record_status, "output_active", None),
+                "output_paused": getattr(record_status, "output_paused", None),
+                "output_bytes": getattr(record_status, "output_bytes", None),
+                "output_duration": getattr(record_status, "output_duration", None),
+                "output_timecode": getattr(record_status, "output_timecode", None),
+            }
         if service_settings:
             coordinator_data["service_settings"] = {
                 "stream_service_type": getattr(service_settings, "stream_service_type", None),

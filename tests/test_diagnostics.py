@@ -15,6 +15,7 @@ from .conftest import (
     MOCK_HOST,
     MOCK_PORT,
     make_event_client_class,
+    make_record_status,
     make_service_settings,
     make_stream_status,
 )
@@ -32,6 +33,7 @@ def _make_req_client() -> MagicMock:
     """Create a mock ReqClient."""
     client = MagicMock()
     client.get_stream_status.return_value = make_stream_status(active=True)
+    client.get_record_status.return_value = make_record_status(active=True, paused=True)
     client.get_stream_service_settings.return_value = make_service_settings()
     client.disconnect.return_value = None
     return client
@@ -72,6 +74,8 @@ async def test_diagnostics(hass: HomeAssistant) -> None:
     # Coordinator data
     assert result["coordinator"]["last_update_success"] is True
     assert result["coordinator"]["data"]["stream_status"]["output_active"] is True
+    assert result["coordinator"]["data"]["record_status"]["output_active"] is True
+    assert result["coordinator"]["data"]["record_status"]["output_paused"] is True
 
     # Stream key should be redacted
     service_settings = result["coordinator"]["data"]["service_settings"]["stream_service_settings"]

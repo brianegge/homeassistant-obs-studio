@@ -56,6 +56,24 @@ def make_stream_status(
     )
 
 
+def make_record_status(
+    *,
+    active: bool = False,
+    paused: bool = False,
+    output_bytes: int = 0,
+    output_duration: int = 0,
+    output_timecode: str = "00:00:00.000",
+) -> SimpleNamespace:
+    """Create a mock record status response."""
+    return SimpleNamespace(
+        output_active=active,
+        output_paused=paused,
+        output_bytes=output_bytes,
+        output_duration=output_duration,
+        output_timecode=output_timecode,
+    )
+
+
 def make_service_settings(
     *,
     service_type: str = "rtmp_common",
@@ -97,6 +115,7 @@ def mock_req_client() -> MagicMock:
     client = MagicMock()
     client.get_version.return_value = SimpleNamespace(obs_version="30.0.0")
     client.get_stream_status.return_value = make_stream_status()
+    client.get_record_status.return_value = make_record_status()
     client.get_stream_service_settings.return_value = make_service_settings()
     client.disconnect.return_value = None
     return client

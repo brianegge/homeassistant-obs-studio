@@ -30,6 +30,7 @@ async def async_setup_entry(  # NOSONAR
         [
             OBSStreamStatusSensor(coordinator, entry),
             OBSStreamServiceSensor(coordinator, entry),
+            OBSRecordStatusSensor(coordinator, entry),
         ]
     )
 
@@ -87,6 +88,43 @@ class OBSStreamStatusSensor(OBSSensorBase):
             "output_skipped_frames": getattr(status, "output_skipped_frames", None),
             "output_total_frames": getattr(status, "output_total_frames", None),
             "output_congestion": getattr(status, "output_congestion", None),
+        }
+
+
+class OBSRecordStatusSensor(OBSSensorBase):
+    """Sensor showing OBS recording status."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options: ClassVar[list[str]] = ["idle", "recording", "paused"]
+    _attr_translation_key = "record_status"
+
+    def __init__(self, coordinator: OBSCoordinator, entry: OBSConfigEntry) -> None:
+        """Initialize."""
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_record_status"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the recording state."""
+        if self.coordinator.data is None:
+            return None
+        status = self.coordinator.data.get("record_status")
+        if not getattr(status, "output_active", False):
+            return "idle"
+        if getattr(status, "output_paused", False):
+            return "paused"
+        return "recording"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return recording statistics."""
+        if self.coordinator.data is None:
+            return {}
+        status = self.coordinator.data.get("record_status")
+        return {
+            "output_bytes": getattr(status, "output_bytes", None),
+            "output_duration": getattr(status, "output_duration", None),
+            "output_timecode": getattr(status, "output_timecode", None),
         }
 
 

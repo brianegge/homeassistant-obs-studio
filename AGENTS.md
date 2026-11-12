@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Custom Home Assistant integration (`obs_websocket`) that monitors OBS Studio via WebSocket v5. It exposes two sensor entities for stream status and service configuration, grouped under a device.
+Custom Home Assistant integration (`obs_websocket`) that monitors OBS Studio via WebSocket v5. It exposes sensor entities for stream status, recording status, and service configuration, grouped under a device.
 
 ## Directory Structure
 
@@ -44,6 +44,7 @@ ha-obs-websocket/                # Git repo root (~/dev/ha-obs-websocket)
 | `OBSWebSocketConfigFlow` | `config_flow.py` | Config flow with user setup, reauth, and reconfigure steps |
 | `OBSSensorBase` | `sensor.py` | Base class with `has_entity_name`, `DeviceInfo` |
 | `OBSStreamStatusSensor` | `sensor.py` | Stream state sensor (streaming/reconnecting/idle) |
+| `OBSRecordStatusSensor` | `sensor.py` | Recording state sensor (recording/paused/idle) |
 | `OBSStreamServiceSensor` | `sensor.py` | Stream service type and settings sensor (diagnostic) |
 
 ## Important Constants (`const.py`)
@@ -59,8 +60,8 @@ ha-obs-websocket/                # Git repo root (~/dev/ha-obs-websocket)
 
 The integration uses two persistent `obsws_python` connections:
 
-1. **ReqClient** - Sends requests to OBS (get_stream_status, get_stream_service_settings).
-2. **EventClient** - Subclassed to define `on_stream_state_changed`, which is registered with `callback.register()` (obsws-python only dispatches events to registered functions). The callback calls `coordinator.async_request_refresh()` via `asyncio.run_coroutine_threadsafe`. The coordinator's debouncer (`immediate=True`, `EVENT_REFRESH_COOLDOWN`) refreshes on the first event and coalesces a burst (STARTING then STARTED) into one trailing refresh.
+1. **ReqClient** - Sends requests to OBS (get_stream_status, get_record_status, get_stream_service_settings).
+2. **EventClient** - Subclassed to define `on_stream_state_changed` and `on_record_state_changed`, each registered with `callback.register()` (obsws-python only dispatches events to registered functions). The callback calls `coordinator.async_request_refresh()` via `asyncio.run_coroutine_threadsafe`. The coordinator's debouncer (`immediate=True`, `EVENT_REFRESH_COOLDOWN`) refreshes on the first event and coalesces a burst (STARTING then STARTED) into one trailing refresh.
 
 Both clients run in the executor (blocking I/O) and are wrapped with `hass.async_add_executor_job`.
 

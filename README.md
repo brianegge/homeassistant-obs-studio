@@ -4,7 +4,7 @@
 
 [OBS Studio](https://obsproject.com/) is a free, open-source application for video recording and live streaming. It is widely used by content creators, gamers, and professionals for streaming to platforms such as Twitch, YouTube, and Facebook Live.
 
-This custom Home Assistant integration connects to OBS Studio via the [WebSocket v5 protocol](https://github.com/obsproject/obs-websocket), exposing real-time stream status and service configuration as sensors, along with buttons to start and stop streaming. It uses a persistent connection with event-driven updates for near-instant state changes.
+This custom Home Assistant integration connects to OBS Studio via the [WebSocket v5 protocol](https://github.com/obsproject/obs-websocket), exposing real-time stream status, recording status, and service configuration as sensors, along with buttons to start and stop streaming. It uses a persistent connection with event-driven updates for near-instant state changes.
 
 ## Requirements
 
@@ -90,6 +90,24 @@ Reports the current streaming state of OBS.
 | `output_total_frames` | Total frames transmitted |
 | `output_congestion` | Network congestion value (0.0 - 1.0) |
 
+#### Record Status
+
+Reports the current recording state of OBS. This is independent of the stream status, so OBS can be streaming and recording at the same time.
+
+| State | Description |
+|-------|-------------|
+| `recording` | OBS is actively recording |
+| `paused` | Recording is paused |
+| `idle` | Not recording |
+
+**Attributes:**
+
+| Attribute | Description |
+|-----------|-------------|
+| `output_bytes` | Total bytes written |
+| `output_duration` | Recording duration in milliseconds |
+| `output_timecode` | Recording timecode (HH:MM:SS.mmm) |
+
 #### Stream Service (Diagnostic)
 
 Reports the configured streaming service. State is the service type (e.g. `rtmp_common`).
@@ -124,7 +142,7 @@ After initial setup, you can reconfigure the connection (host, port, password) v
 
 The integration maintains a persistent WebSocket connection to OBS with two update mechanisms:
 
-- **Event-driven (primary):** The `EventClient` listens for `StreamStateChanged` events from OBS, triggering an immediate sensor refresh when the stream starts, stops, or reconnects.
+- **Event-driven (primary):** The `EventClient` listens for `StreamStateChanged` and `RecordStateChanged` events from OBS, triggering an immediate sensor refresh when the stream or recording starts, stops, pauses, or reconnects.
 - **Heartbeat poll (fallback):** A `DataUpdateCoordinator` polls OBS every **60 seconds** to sync state in case an event is missed or the connection was briefly interrupted.
 
 If the connection to OBS drops, sensors are marked **unavailable** and the coordinator attempts to reconnect on the next poll cycle.
@@ -186,7 +204,7 @@ automation:
 ## Known Limitations
 
 - **Synchronous library** - The underlying `obsws-python` library uses threads rather than asyncio, so all calls are wrapped with `async_add_executor_job`.
-- **Single stream output** - Only the primary stream output is monitored. Recording status and virtual cam status are not currently tracked.
+- **Single stream output** - Only the primary stream output is monitored. Virtual cam and replay buffer status are not currently tracked.
 - **No auto-discovery** - You must manually enter the OBS host and port; the integration cannot discover OBS instances on the network.
 - **No device firmware version** - The OBS version is not currently reported in device info.
 
