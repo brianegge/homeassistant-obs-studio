@@ -2,21 +2,56 @@
 
 from __future__ import annotations
 
-import logging
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
-from homeassistant.components.button import ButtonEntity
+from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import OBSConfigEntry, OBSCoordinator
+from . import OBSConfigEntry, OBSConnection, OBSCoordinator
 from .const import DOMAIN
 
-_LOGGER = logging.getLogger(__name__)
-
 PARALLEL_UPDATES = 1
+
+
+@dataclass(frozen=True, kw_only=True)
+class OBSButtonEntityDescription(ButtonEntityDescription):
+    """Describes an OBS button: the request it sends and its error message."""
+
+    press_fn: Callable[[OBSConnection], Awaitable[None]]
+    error_key: str
+
+
+BUTTONS: tuple[OBSButtonEntityDescription, ...] = (
+    OBSButtonEntityDescription(
+        key="start_stream",
+        translation_key="start_stream",
+        press_fn=lambda conn: conn.async_start_stream(),
+        error_key="start_stream_failed",
+    ),
+    OBSButtonEntityDescription(
+        key="stop_stream",
+        translation_key="stop_stream",
+        press_fn=lambda conn: conn.async_stop_stream(),
+        error_key="stop_stream_failed",
+    ),
+    OBSButtonEntityDescription(
+        key="start_record",
+        translation_key="start_record",
+        press_fn=lambda conn: conn.async_start_record(),
+        error_key="start_record_failed",
+    ),
+    OBSButtonEntityDescription(
+        key="stop_record",
+        translation_key="stop_record",
+        press_fn=lambda conn: conn.async_stop_record(),
+        error_key="stop_record_failed",
+    ),
+)
 
 
 async def async_setup_entry(
@@ -24,23 +59,25 @@ async def async_setup_entry(
 ) -> None:
     """Set up OBS WebSocket buttons from a config entry."""
     coordinator = entry.runtime_data.coordinator
-
-    async_add_entities(
-        [
-            OBSStartStreamButton(coordinator, entry),
-            OBSStopStreamButton(coordinator, entry),
-        ]
-    )
+    async_add_entities(OBSButton(coordinator, entry, description) for description in BUTTONS)
 
 
-class OBSButtonBase(CoordinatorEntity[OBSCoordinator], ButtonEntity):
-    """Base class for OBS buttons."""
+class OBSButton(CoordinatorEntity[OBSCoordinator], ButtonEntity):
+    """A button that sends one request to OBS."""
 
     _attr_has_entity_name = True
+    entity_description: OBSButtonEntityDescription
 
-    def __init__(self, coordinator: OBSCoordinator, entry: OBSConfigEntry) -> None:
+    def __init__(
+        self,
+        coordinator: OBSCoordinator,
+        entry: OBSConfigEntry,
+        description: OBSButtonEntityDescription,
+    ) -> None:
         """Initialize."""
         super().__init__(coordinator)
+        self.entity_description = description
+        self._attr_unique_id = f"{entry.entry_id}_{description.key}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name=f"OBS Studio ({entry.data['host']})",
@@ -49,50 +86,14 @@ class OBSButtonBase(CoordinatorEntity[OBSCoordinator], ButtonEntity):
         )
         self._connection = coordinator.connection
 
-
-class OBSStartStreamButton(OBSButtonBase):
-    """Button to start OBS streaming."""
-
-    _attr_translation_key = "start_stream"
-
-    def __init__(self, coordinator: OBSCoordinator, entry: OBSConfigEntry) -> None:
-        """Initialize."""
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{entry.entry_id}_start_stream"
-
     async def async_press(self) -> None:
-        """Press the button to start streaming."""
+        """Send the button's request to OBS."""
         try:
-            await self._connection.async_start_stream()
+            await self.entity_description.press_fn(self._connection)
         except Exception as err:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
-                translation_key="start_stream_failed",
-                translation_placeholders={
-                    "host": self._connection.host,
-                    "error": str(err),
-                },
-            ) from err
-
-
-class OBSStopStreamButton(OBSButtonBase):
-    """Button to stop OBS streaming."""
-
-    _attr_translation_key = "stop_stream"
-
-    def __init__(self, coordinator: OBSCoordinator, entry: OBSConfigEntry) -> None:
-        """Initialize."""
-        super().__init__(coordinator, entry)
-        self._attr_unique_id = f"{entry.entry_id}_stop_stream"
-
-    async def async_press(self) -> None:
-        """Press the button to stop streaming."""
-        try:
-            await self._connection.async_stop_stream()
-        except Exception as err:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="stop_stream_failed",
+                translation_key=self.entity_description.error_key,
                 translation_placeholders={
                     "host": self._connection.host,
                     "error": str(err),

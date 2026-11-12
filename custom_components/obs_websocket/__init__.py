@@ -149,6 +149,14 @@ class OBSConnection:
         """Stop streaming in OBS."""
         await self._async_request(lambda client: client.stop_stream())
 
+    async def async_start_record(self) -> None:
+        """Start recording in OBS."""
+        await self._async_request(lambda client: client.start_record())
+
+    async def async_stop_record(self) -> None:
+        """Stop recording in OBS."""
+        await self._async_request(lambda client: client.stop_record())
+
     async def async_disconnect(self) -> None:
         """Disconnect both clients."""
 
