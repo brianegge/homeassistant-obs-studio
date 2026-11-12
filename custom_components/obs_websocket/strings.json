@@ -63,6 +63,12 @@
     },
     "invalid_auth": {
       "message": "OBS WebSocket at {host} rejected the password"
+    },
+    "start_record_failed": {
+      "message": "Failed to start recording on OBS at {host}: {error}"
+    },
+    "stop_record_failed": {
+      "message": "Failed to stop recording on OBS at {host}: {error}"
     }
   },
   "entity": {
@@ -93,6 +99,12 @@
       },
       "stop_stream": {
         "name": "Stop stream"
+      },
+      "start_record": {
+        "name": "Start recording"
+      },
+      "stop_record": {
+        "name": "Stop recording"
       }
     }
   }

@@ -11,6 +11,7 @@ ha-obs-websocket/                # Git repo root (~/dev/ha-obs-websocket)
 ├── custom_components/
 │   └── obs_websocket/
 │       ├── __init__.py          # Core: OBSConnection, OBSCoordinator, OBSRuntimeData, OBSConfigEntry
+│       ├── button.py            # Buttons: start/stop stream, start/stop recording
 │       ├── config_flow.py       # Config flow: user setup, reauth, reconfigure
 │       ├── const.py             # Constants: DOMAIN, defaults, HEARTBEAT_INTERVAL, PLATFORMS
 │       ├── diagnostics.py       # Diagnostics support
@@ -48,6 +49,7 @@ ha-obs-websocket/                # Git repo root (~/dev/ha-obs-websocket)
 | `OBSStreamStatusSensor` | `sensor.py` | Stream state sensor (streaming/reconnecting/idle) |
 | `OBSRecordStatusSensor` | `sensor.py` | Recording state sensor (recording/paused/idle) |
 | `OBSStreamServiceSensor` | `sensor.py` | Stream service type and settings sensor (diagnostic) |
+| `OBSButton` | `button.py` | One button per `OBSButtonEntityDescription` in `BUTTONS`: start/stop stream, start/stop recording |
 
 ## Important Constants (`const.py`)
 

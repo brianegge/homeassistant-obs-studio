@@ -27,6 +27,12 @@
       },
       "stop_stream": {
         "default": "mdi:stop"
+      },
+      "start_record": {
+        "default": "mdi:record-rec"
+      },
+      "stop_record": {
+        "default": "mdi:stop-circle"
       }
     }
   }

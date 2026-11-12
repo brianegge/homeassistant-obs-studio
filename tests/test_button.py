@@ -24,6 +24,8 @@ from .conftest import (
 
 START_ENTITY_ID = "button.obs_studio_192_168_1_100_start_stream"
 STOP_ENTITY_ID = "button.obs_studio_192_168_1_100_stop_stream"
+START_RECORD_ENTITY_ID = "button.obs_studio_192_168_1_100_start_recording"
+STOP_RECORD_ENTITY_ID = "button.obs_studio_192_168_1_100_stop_recording"
 
 
 def _make_mock_obs(req_client: MagicMock) -> MagicMock:
@@ -42,6 +44,8 @@ def _make_req_client() -> MagicMock:
     client.disconnect.return_value = None
     client.start_stream.return_value = None
     client.stop_stream.return_value = None
+    client.start_record.return_value = None
+    client.stop_record.return_value = None
     return client
 
 
@@ -202,3 +206,64 @@ async def test_button_device_info(hass: HomeAssistant) -> None:
     devices = dr.async_entries_for_config_entry(dev_registry, ent.config_entry_id)
     assert len(devices) >= 1
     assert MOCK_HOST in devices[0].name
+
+
+@pytest.mark.parametrize(
+    ("entity_id", "unique_suffix", "method"),
+    [
+        (START_RECORD_ENTITY_ID, "start_record", "start_record"),
+        (STOP_RECORD_ENTITY_ID, "stop_record", "stop_record"),
+    ],
+)
+async def test_press_record_button_success(
+    hass: HomeAssistant, entity_id: str, unique_suffix: str, method: str
+) -> None:
+    """Test the record buttons are registered and send their request."""
+    req_client = _make_req_client()
+    entry = await _setup_integration(hass, req_client)
+
+    ent = er.async_get(hass).async_get(entity_id)
+    assert ent is not None
+    assert ent.unique_id == f"{entry.entry_id}_{unique_suffix}"
+
+    await hass.services.async_call("button", "press", {"entity_id": entity_id}, blocking=True)
+
+    getattr(req_client, method).assert_called_once()
+    req_client.start_stream.assert_not_called()
+    req_client.stop_stream.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("entity_id", "method", "translation_key", "message"),
+    [
+        (
+            START_RECORD_ENTITY_ID,
+            "start_record",
+            "start_record_failed",
+            f"Failed to start recording on OBS at {MOCK_HOST}: Recording already active",
+        ),
+        (
+            STOP_RECORD_ENTITY_ID,
+            "stop_record",
+            "stop_record_failed",
+            f"Failed to stop recording on OBS at {MOCK_HOST}: Recording already active",
+        ),
+    ],
+)
+async def test_press_record_button_failure(
+    hass: HomeAssistant, entity_id: str, method: str, translation_key: str, message: str
+) -> None:
+    """Test the record buttons raise a translated error on failure."""
+    req_client = _make_req_client()
+    await _setup_integration(hass, req_client)
+
+    getattr(req_client, method).side_effect = Exception("Recording already active")
+
+    with (
+        patch.dict("sys.modules", {"obsws_python": _make_mock_obs(req_client)}),
+        pytest.raises(HomeAssistantError) as exc_info,
+    ):
+        await hass.services.async_call("button", "press", {"entity_id": entity_id}, blocking=True)
+
+    assert exc_info.value.translation_key == translation_key
+    assert str(exc_info.value) == message

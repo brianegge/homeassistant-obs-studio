@@ -4,7 +4,7 @@
 
 [OBS Studio](https://obsproject.com/) is a free, open-source application for video recording and live streaming. It is widely used by content creators, gamers, and professionals for streaming to platforms such as Twitch, YouTube, and Facebook Live.
 
-This custom Home Assistant integration connects to OBS Studio via the [WebSocket v5 protocol](https://github.com/obsproject/obs-websocket), exposing real-time stream status, recording status, and service configuration as sensors, along with buttons to start and stop streaming. It uses a persistent connection with event-driven updates for near-instant state changes.
+This custom Home Assistant integration connects to OBS Studio via the [WebSocket v5 protocol](https://github.com/obsproject/obs-websocket), exposing real-time stream status, recording status, and service configuration as sensors, along with buttons to start and stop streaming and recording. It uses a persistent connection with event-driven updates for near-instant state changes.
 
 ## Requirements
 
@@ -127,6 +127,14 @@ Press to start streaming in OBS. Raises an error if OBS is unreachable or the st
 #### Stop Stream
 
 Press to stop streaming in OBS. Raises an error if OBS is unreachable or the stream cannot be stopped (e.g. not currently streaming).
+
+#### Start Recording
+
+Press to start recording in OBS, to the output path set in OBS. Independent of streaming. Raises an error if OBS is unreachable or recording cannot be started (e.g. already recording).
+
+#### Stop Recording
+
+Press to stop recording in OBS. Raises an error if OBS is unreachable or recording cannot be stopped (e.g. not currently recording).
 
 ## Configuration
 
