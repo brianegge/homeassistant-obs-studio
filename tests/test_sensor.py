@@ -22,8 +22,8 @@ from .conftest import (
     make_stream_status,
 )
 
-SERVICE_ENTITY_ID = "sensor.obs_studio_192_168_1_100_2"
-STATUS_ENTITY_ID = "sensor.obs_studio_192_168_1_100"
+SERVICE_ENTITY_ID = "sensor.obs_studio_192_168_1_100_stream_service"
+STATUS_ENTITY_ID = "sensor.obs_studio_192_168_1_100_stream_status"
 
 
 def _make_mock_obs(req_client: MagicMock) -> MagicMock:

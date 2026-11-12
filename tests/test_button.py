@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from homeassistant.const import STATE_UNAVAILABLE
@@ -22,8 +22,8 @@ from .conftest import (
     make_stream_status,
 )
 
-START_ENTITY_ID = "button.obs_studio_192_168_1_100"
-STOP_ENTITY_ID = "button.obs_studio_192_168_1_100_2"
+START_ENTITY_ID = "button.obs_studio_192_168_1_100_start_stream"
+STOP_ENTITY_ID = "button.obs_studio_192_168_1_100_stop_stream"
 
 
 def _make_mock_obs(req_client: MagicMock) -> MagicMock:
@@ -131,13 +131,19 @@ async def test_press_start_stream_failure(hass: HomeAssistant) -> None:
 
     req_client.start_stream.side_effect = Exception("Stream already active")
 
-    with pytest.raises(HomeAssistantError, match="start_stream_failed"):
+    with (
+        patch.dict("sys.modules", {"obsws_python": _make_mock_obs(req_client)}),
+        pytest.raises(HomeAssistantError) as exc_info,
+    ):
         await hass.services.async_call(
             "button",
             "press",
             {"entity_id": START_ENTITY_ID},
             blocking=True,
         )
+
+    assert exc_info.value.translation_key == "start_stream_failed"
+    assert str(exc_info.value) == f"Failed to start streaming on OBS at {MOCK_HOST}: Stream already active"
 
 
 async def test_press_stop_stream_failure(hass: HomeAssistant) -> None:
@@ -147,13 +153,19 @@ async def test_press_stop_stream_failure(hass: HomeAssistant) -> None:
 
     req_client.stop_stream.side_effect = Exception("Not streaming")
 
-    with pytest.raises(HomeAssistantError, match="stop_stream_failed"):
+    with (
+        patch.dict("sys.modules", {"obsws_python": _make_mock_obs(req_client)}),
+        pytest.raises(HomeAssistantError) as exc_info,
+    ):
         await hass.services.async_call(
             "button",
             "press",
             {"entity_id": STOP_ENTITY_ID},
             blocking=True,
         )
+
+    assert exc_info.value.translation_key == "stop_stream_failed"
+    assert str(exc_info.value) == f"Failed to stop streaming on OBS at {MOCK_HOST}: Not streaming"
 
 
 async def test_button_unavailable_on_coordinator_failure(hass: HomeAssistant) -> None:

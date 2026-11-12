@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import timedelta
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -506,3 +508,15 @@ async def test_command_raises_when_reconnect_also_fails(hass: HomeAssistant) -> 
         first.stop_stream.assert_called_once()
         second.stop_stream.assert_called_once()
         assert not connection.connected
+
+
+def test_translations_match_strings() -> None:
+    """Test translations/en.json is kept in sync with strings.json.
+
+    Home Assistant only loads translations/ for custom integrations, so strings.json alone
+    leaves entity names, states, and error messages untranslated.
+    """
+    component = Path(__file__).parent.parent / "custom_components" / "obs_websocket"
+    strings = json.loads((component / "strings.json").read_text(encoding="utf-8"))
+    en = json.loads((component / "translations" / "en.json").read_text(encoding="utf-8"))
+    assert en == strings
