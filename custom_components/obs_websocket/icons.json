@@ -19,6 +19,36 @@
           "paused": "mdi:pause-circle",
           "idle": "mdi:record"
         }
+      },
+      "active_fps": {
+        "default": "mdi:speedometer"
+      },
+      "render_skipped_frames": {
+        "default": "mdi:image-broken-variant"
+      },
+      "encoding_lagged_frames": {
+        "default": "mdi:timer-sand"
+      },
+      "stream_dropped_frames": {
+        "default": "mdi:lan-disconnect"
+      },
+      "stream_congestion": {
+        "default": "mdi:traffic-light"
+      },
+      "stream_bitrate": {
+        "default": "mdi:upload-network"
+      },
+      "available_disk_space": {
+        "default": "mdi:harddisk"
+      },
+      "cpu_usage": {
+        "default": "mdi:cpu-64-bit"
+      },
+      "memory_usage": {
+        "default": "mdi:memory"
+      },
+      "average_frame_render_time": {
+        "default": "mdi:timer-outline"
       }
     },
     "button": {
@@ -33,6 +63,11 @@
       },
       "stop_record": {
         "default": "mdi:stop-circle"
+      }
+    },
+    "camera": {
+      "program": {
+        "default": "mdi:monitor-eye"
       }
     }
   }

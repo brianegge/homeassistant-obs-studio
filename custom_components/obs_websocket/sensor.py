@@ -3,16 +3,29 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, ClassVar
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
-from homeassistant.const import EntityCategory
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorEntityDescription,
+    SensorStateClass,
+)
+from homeassistant.const import (
+    PERCENTAGE,
+    EntityCategory,
+    UnitOfDataRate,
+    UnitOfInformation,
+    UnitOfTime,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import OBSConfigEntry, OBSCoordinator
+from . import OBSConfigEntry, OBSCoordinator, numeric_field
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -31,6 +44,7 @@ async def async_setup_entry(  # NOSONAR
             OBSStreamStatusSensor(coordinator, entry),
             OBSStreamServiceSensor(coordinator, entry),
             OBSRecordStatusSensor(coordinator, entry),
+            *(OBSStatSensor(coordinator, entry, description) for description in STAT_SENSORS),
         ]
     )
 
@@ -156,3 +170,166 @@ class OBSStreamServiceSensor(OBSSensorBase):
         svc = self.coordinator.data["service_settings"]
         settings = getattr(svc, "stream_service_settings", {})
         return {"stream_service_settings": settings}
+
+
+def _rate(key: str) -> Callable[[dict[str, Any]], float | None]:
+    return lambda data: data.get("rates", {}).get(key)
+
+
+def _stat(attr: str) -> Callable[[dict[str, Any]], float | None]:
+    return lambda data: numeric_field(data.get("stats"), attr)
+
+
+def _congestion(data: dict[str, Any]) -> float | None:
+    stream = data.get("stream_status")
+    congestion = numeric_field(stream, "output_congestion")
+    if not getattr(stream, "output_active", False) or congestion is None:
+        return None
+    return round(congestion * 100, 1)
+
+
+def _counters(obj_key: str, skipped: str, total: str) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """Expose OBS's cumulative counters alongside a windowed percentage."""
+
+    def attrs(data: dict[str, Any]) -> dict[str, Any]:
+        obj = data.get(obj_key)
+        return {"skipped_frames": numeric_field(obj, skipped), "total_frames": numeric_field(obj, total)}
+
+    return attrs
+
+
+@dataclass(frozen=True, kw_only=True)
+class OBSStatSensorEntityDescription(SensorEntityDescription):
+    """Describes a numeric OBS statistic."""
+
+    value_fn: Callable[[dict[str, Any]], float | None]
+    attrs_fn: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+
+
+STAT_SENSORS: tuple[OBSStatSensorEntityDescription, ...] = (
+    OBSStatSensorEntityDescription(
+        key="active_fps",
+        translation_key="active_fps",
+        native_unit_of_measurement="fps",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        value_fn=_stat("active_fps"),
+    ),
+    OBSStatSensorEntityDescription(
+        key="render_skipped_frames",
+        translation_key="render_skipped_frames",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        value_fn=_rate("render_skipped_pct"),
+        attrs_fn=_counters("stats", "render_skipped_frames", "render_total_frames"),
+    ),
+    OBSStatSensorEntityDescription(
+        key="encoding_lagged_frames",
+        translation_key="encoding_lagged_frames",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        value_fn=_rate("encoding_lag_pct"),
+        attrs_fn=_counters("stats", "output_skipped_frames", "output_total_frames"),
+    ),
+    OBSStatSensorEntityDescription(
+        key="stream_dropped_frames",
+        translation_key="stream_dropped_frames",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        value_fn=_rate("stream_dropped_pct"),
+        attrs_fn=_counters("stream_status", "output_skipped_frames", "output_total_frames"),
+    ),
+    OBSStatSensorEntityDescription(
+        key="stream_congestion",
+        translation_key="stream_congestion",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        value_fn=_congestion,
+    ),
+    OBSStatSensorEntityDescription(
+        key="stream_bitrate",
+        translation_key="stream_bitrate",
+        device_class=SensorDeviceClass.DATA_RATE,
+        native_unit_of_measurement=UnitOfDataRate.KILOBITS_PER_SECOND,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
+        value_fn=_rate("stream_bitrate"),
+    ),
+    OBSStatSensorEntityDescription(
+        key="available_disk_space",
+        translation_key="available_disk_space",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement=UnitOfInformation.MEGABYTES,
+        suggested_unit_of_measurement=UnitOfInformation.GIGABYTES,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        value_fn=_stat("available_disk_space"),
+    ),
+    OBSStatSensorEntityDescription(
+        key="cpu_usage",
+        translation_key="cpu_usage",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=1,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=_stat("cpu_usage"),
+    ),
+    OBSStatSensorEntityDescription(
+        key="memory_usage",
+        translation_key="memory_usage",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement=UnitOfInformation.MEGABYTES,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=_stat("memory_usage"),
+    ),
+    OBSStatSensorEntityDescription(
+        key="average_frame_render_time",
+        translation_key="average_frame_render_time",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.MILLISECONDS,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=2,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        value_fn=_stat("average_frame_render_time"),
+    ),
+)
+
+
+class OBSStatSensor(OBSSensorBase):
+    """A numeric OBS statistic: performance, stream health or disk space."""
+
+    entity_description: OBSStatSensorEntityDescription
+
+    def __init__(
+        self,
+        coordinator: OBSCoordinator,
+        entry: OBSConfigEntry,
+        description: OBSStatSensorEntityDescription,
+    ) -> None:
+        """Initialize."""
+        super().__init__(coordinator, entry)
+        self.entity_description = description
+        self._attr_unique_id = f"{entry.entry_id}_{description.key}"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the statistic."""
+        if self.coordinator.data is None:
+            return None
+        return self.entity_description.value_fn(self.coordinator.data)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return the cumulative counters behind a windowed percentage."""
+        if self.coordinator.data is None or self.entity_description.attrs_fn is None:
+            return None
+        return self.entity_description.attrs_fn(self.coordinator.data)

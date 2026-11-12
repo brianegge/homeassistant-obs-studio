@@ -91,6 +91,36 @@
           "recording": "Recording",
           "paused": "Paused"
         }
+      },
+      "active_fps": {
+        "name": "Active FPS"
+      },
+      "render_skipped_frames": {
+        "name": "Render skipped frames"
+      },
+      "encoding_lagged_frames": {
+        "name": "Encoding lagged frames"
+      },
+      "stream_dropped_frames": {
+        "name": "Stream dropped frames"
+      },
+      "stream_congestion": {
+        "name": "Stream congestion"
+      },
+      "stream_bitrate": {
+        "name": "Stream bitrate"
+      },
+      "available_disk_space": {
+        "name": "Available disk space"
+      },
+      "cpu_usage": {
+        "name": "CPU usage"
+      },
+      "memory_usage": {
+        "name": "Memory usage"
+      },
+      "average_frame_render_time": {
+        "name": "Average frame render time"
       }
     },
     "button": {
@@ -105,6 +135,11 @@
       },
       "stop_record": {
         "name": "Stop recording"
+      }
+    },
+    "camera": {
+      "program": {
+        "name": "Program"
       }
     }
   }

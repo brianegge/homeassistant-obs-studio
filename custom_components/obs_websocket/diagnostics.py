@@ -11,6 +11,18 @@ from . import OBSConfigEntry
 
 TO_REDACT: set[str] = {"password", "key"}
 
+STATS_FIELDS = (
+    "active_fps",
+    "available_disk_space",
+    "average_frame_render_time",
+    "cpu_usage",
+    "memory_usage",
+    "output_skipped_frames",
+    "output_total_frames",
+    "render_skipped_frames",
+    "render_total_frames",
+)
+
 
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: OBSConfigEntry) -> dict[str, Any]:  # NOSONAR
     """Return diagnostics for a config entry."""
@@ -41,6 +53,11 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: OBSConf
                 "output_duration": getattr(record_status, "output_duration", None),
                 "output_timecode": getattr(record_status, "output_timecode", None),
             }
+        stats = coordinator.data.get("stats")
+        if stats:
+            coordinator_data["stats"] = {field: getattr(stats, field, None) for field in STATS_FIELDS}
+        if "rates" in coordinator.data:
+            coordinator_data["rates"] = dict(coordinator.data["rates"])
         if service_settings:
             coordinator_data["service_settings"] = {
                 "stream_service_type": getattr(service_settings, "stream_service_type", None),

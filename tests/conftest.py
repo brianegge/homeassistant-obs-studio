@@ -82,6 +82,32 @@ def make_record_status(
     )
 
 
+def make_stats(
+    *,
+    active_fps: float = 30.0,
+    render_skipped_frames: int = 0,
+    render_total_frames: int = 1000,
+    output_skipped_frames: int = 0,
+    output_total_frames: int = 1000,
+    available_disk_space: float = 102400.0,
+    cpu_usage: float = 5.0,
+    memory_usage: float = 512.0,
+    average_frame_render_time: float = 1.5,
+) -> SimpleNamespace:
+    """Create a mock GetStats response."""
+    return SimpleNamespace(
+        active_fps=active_fps,
+        render_skipped_frames=render_skipped_frames,
+        render_total_frames=render_total_frames,
+        output_skipped_frames=output_skipped_frames,
+        output_total_frames=output_total_frames,
+        available_disk_space=available_disk_space,
+        cpu_usage=cpu_usage,
+        memory_usage=memory_usage,
+        average_frame_render_time=average_frame_render_time,
+    )
+
+
 def make_service_settings(
     *,
     service_type: str = "rtmp_common",
@@ -125,6 +151,7 @@ def mock_req_client() -> MagicMock:
     client.get_stream_status.return_value = make_stream_status()
     client.get_record_status.return_value = make_record_status()
     client.get_stream_service_settings.return_value = make_service_settings()
+    client.get_stats.return_value = make_stats()
     client.disconnect.return_value = None
     return client
 

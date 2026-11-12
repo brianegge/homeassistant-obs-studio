@@ -4,7 +4,7 @@
 
 [OBS Studio](https://obsproject.com/) is a free, open-source application for video recording and live streaming. It is widely used by content creators, gamers, and professionals for streaming to platforms such as Twitch, YouTube, and Facebook Live.
 
-This custom Home Assistant integration connects to OBS Studio via the [WebSocket v5 protocol](https://github.com/obsproject/obs-websocket), exposing real-time stream status, recording status, and service configuration as sensors, along with buttons to start and stop streaming and recording. It uses a persistent connection with event-driven updates for near-instant state changes.
+This custom Home Assistant integration connects to OBS Studio via the [WebSocket v5 protocol](https://github.com/obsproject/obs-websocket), exposing real-time stream status, recording status, stream health and performance statistics, and service configuration as sensors, a snapshot camera of the program output, and buttons to start and stop streaming and recording. It uses a persistent connection with event-driven updates for near-instant state changes.
 
 ## Requirements
 
@@ -118,6 +118,29 @@ Reports the configured streaming service. State is the service type (e.g. `rtmp_
 |-----------|-------------|
 | `stream_service_settings` | Dict containing `server`, `key`, and other service-specific fields |
 
+#### Performance and Stream Health
+
+Numeric sensors from OBS's `GetStats` and stream status. OBS's frame counters are cumulative (since OBS or the output started), which hides whether frames are being lost *now*, so the percentage sensors are measured over the window since the previous update (at least 10 seconds; usually the 60-second poll). The cumulative counts are kept as `skipped_frames` / `total_frames` attributes.
+
+| Sensor | Unit | Description |
+|--------|------|-------------|
+| Active FPS | fps | Frames per second OBS is actually rendering; below your configured FPS means OBS is falling behind. |
+| Render skipped frames | % | Frames the renderer missed (GPU overloaded, or the app throttled). |
+| Encoding lagged frames | % | Frames skipped because the encoder could not keep up (CPU/encoder overloaded). |
+| Stream dropped frames | % | Frames dropped by the stream output (network). Unknown when not streaming. |
+| Stream congestion | % | OBS's congestion estimate for the stream output. Unknown when not streaming. |
+| Stream bitrate | kbit/s | Upload bitrate over the last window; 0 when not streaming. |
+| Available disk space | GB | Free space on the recording drive. |
+| CPU usage *(diagnostic, disabled by default)* | % | OBS process CPU usage. |
+| Memory usage *(diagnostic, disabled by default)* | MB | OBS process memory. |
+| Average frame render time *(diagnostic, disabled by default)* | ms | Average time to render a frame. |
+
+### Camera
+
+#### Program *(disabled by default)*
+
+A still image of the current program scene — what is going to the stream and recording — taken with `GetSourceScreenshot` each time the frontend or an automation asks for one (JPEG, scaled to fit the requested size, 1280 px by default). Rendering a screenshot costs OBS some GPU time, so enable it only where it is useful, e.g. a dashboard picture card or a pre-service check that snapshots the output.
+
 ### Buttons
 
 #### Start Stream
@@ -153,6 +176,10 @@ The integration maintains a persistent WebSocket connection to OBS with two upda
 - **Event-driven (primary):** The `EventClient` listens for `StreamStateChanged` and `RecordStateChanged` events from OBS, triggering an immediate sensor refresh when the stream or recording starts, stops, pauses, or reconnects.
 - **Heartbeat poll (fallback):** A `DataUpdateCoordinator` polls OBS every **60 seconds** to sync state in case an event is missed or the connection was briefly interrupted.
 
+The performance and stream-health sensors update on the same poll (and on stream/record events), so their resolution is about a minute. The program camera fetches a new screenshot on demand instead.
+
+Requests are sent one at a time over the connection: `obsws-python` does not match replies to request IDs, so overlapping requests (a poll, a button press, a camera snapshot) could otherwise receive each other's replies.
+
 If the connection to OBS drops, sensors are marked **unavailable** and the coordinator attempts to reconnect on the next poll cycle.
 
 ## Automation Examples
@@ -172,19 +199,38 @@ automation:
           message: "OBS is now streaming!"
 ```
 
-**Alert on high frame skipping:**
+**Alert on dropped frames while live:**
 
 ```yaml
 automation:
   - alias: "Alert frame drops"
     trigger:
-      - platform: template
-        value_template: >
-          {{ state_attr('sensor.obs_stream_status', 'output_skipped_frames') | int > 100 }}
+      - platform: numeric_state
+        entity_id: sensor.obs_studio_stream_dropped_frames
+        above: 2
+        for: "00:02:00"
     action:
       - service: notify.mobile_app
         data:
-          message: "OBS has skipped {{ state_attr('sensor.obs_stream_status', 'output_skipped_frames') }} frames"
+          message: "OBS is dropping {{ states('sensor.obs_studio_stream_dropped_frames') }}% of stream frames"
+```
+
+**Warn when OBS can't keep up before going live:**
+
+```yaml
+automation:
+  - alias: "OBS rendering behind"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.obs_studio_render_skipped_frames
+        above: 5
+        for: "00:05:00"
+    action:
+      - service: notify.mobile_app
+        data:
+          message: >
+            OBS is skipping {{ states('sensor.obs_studio_render_skipped_frames') }}% of rendered
+            frames ({{ states('sensor.obs_studio_active_fps') }} fps)
 ```
 
 **Turn off lights when stream goes live:**
@@ -204,7 +250,7 @@ automation:
 
 ## Use Cases
 
-- **Stream monitoring dashboards** - Display stream status, uptime, and frame statistics on a Lovelace dashboard.
+- **Stream monitoring dashboards** - Display stream status, bitrate, dropped frames, and a snapshot of the program output on a Lovelace dashboard.
 - **Automated notifications** - Get alerts on your phone when a stream starts, stops, or experiences issues.
 - **Smart home integration** - Trigger lights, cameras, or "on air" signs when you go live.
 - **Uptime tracking** - Log stream duration and stability over time using the recorder.
@@ -215,6 +261,7 @@ automation:
 - **Single stream output** - Only the primary stream output is monitored. Virtual cam and replay buffer status are not currently tracked.
 - **No auto-discovery** - You must manually enter the OBS host and port; the integration cannot discover OBS instances on the network.
 - **No device firmware version** - The OBS version is not currently reported in device info.
+- **Minute resolution** - Performance and stream-health sensors are polled about once a minute; short spikes between polls are averaged into the window.
 
 ## Troubleshooting
 
