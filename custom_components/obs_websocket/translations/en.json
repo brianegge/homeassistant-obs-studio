@@ -1,0 +1,87 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "OBS WebSocket Connection",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "Hostname or IP address of the OBS machine",
+          "port": "WebSocket server port (default 4455)",
+          "password": "WebSocket server password (leave blank if none)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate OBS WebSocket",
+        "description": "The connection to OBS failed. Please update the password.",
+        "data": {
+          "password": "Password"
+        },
+        "data_description": {
+          "password": "WebSocket server password (leave blank if none)"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure OBS WebSocket",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "Hostname or IP address of the OBS machine",
+          "port": "WebSocket server port (default 4455)",
+          "password": "WebSocket server password (leave blank if none)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to OBS WebSocket"
+    },
+    "abort": {
+      "already_configured": "This OBS instance is already configured",
+      "reauth_successful": "Re-authentication was successful",
+      "reconfigure_successful": "Reconfiguration was successful"
+    }
+  },
+  "exceptions": {
+    "connection_failed": {
+      "message": "Cannot connect to OBS WebSocket at {host}: {error}"
+    },
+    "communication_error": {
+      "message": "Error communicating with OBS WebSocket at {host}: {error}"
+    },
+    "start_stream_failed": {
+      "message": "Failed to start streaming on OBS at {host}: {error}"
+    },
+    "stop_stream_failed": {
+      "message": "Failed to stop streaming on OBS at {host}: {error}"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "stream_status": {
+        "name": "Stream status",
+        "state": {
+          "idle": "Idle",
+          "streaming": "Streaming",
+          "reconnecting": "Reconnecting"
+        }
+      },
+      "stream_service": {
+        "name": "Stream service"
+      }
+    },
+    "button": {
+      "start_stream": {
+        "name": "Start stream"
+      },
+      "stop_stream": {
+        "name": "Stop stream"
+      }
+    }
+  }
+}
