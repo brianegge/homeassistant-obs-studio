@@ -16,4 +16,13 @@ HEARTBEAT_INTERVAL: Final = 60
 # into a single trailing refresh.
 EVENT_REFRESH_COOLDOWN: Final = 0.5
 
-PLATFORMS: Final[list[str]] = ["button", "sensor"]
+# Rates (bitrate, skipped-frame percentages) are measured over at least this
+# many seconds; a refresh sooner than that keeps the previous values.
+MIN_RATE_INTERVAL: Final = 10
+
+# Program snapshot camera: default bounding box when the frontend gives no
+# size, and JPEG quality (0-100).
+DEFAULT_SNAPSHOT_SIZE: Final = 1280
+SNAPSHOT_QUALITY: Final = 80
+
+PLATFORMS: Final[list[str]] = ["button", "camera", "sensor"]

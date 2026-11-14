@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import logging
+import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
@@ -16,7 +19,14 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN, EVENT_REFRESH_COOLDOWN, HEARTBEAT_INTERVAL, PLATFORMS
+from .const import (
+    DOMAIN,
+    EVENT_REFRESH_COOLDOWN,
+    HEARTBEAT_INTERVAL,
+    MIN_RATE_INTERVAL,
+    PLATFORMS,
+    SNAPSHOT_QUALITY,
+)
 from .errors import OBSAuthError, is_auth_error
 
 
@@ -45,6 +55,11 @@ class OBSConnection:
         self._password = password
         self._req_client: Any | None = None
         self._event_client: Any | None = None
+        # obsws-python's ReqClient sends a request and returns whatever reply
+        # arrives next, without matching request IDs, so two requests in flight
+        # on the one socket (a poll and a button press or camera snapshot) can
+        # swap replies. Serialize them.
+        self._request_lock = threading.Lock()
         self.coordinator: DataUpdateCoordinator[dict[str, Any]] | None = None
 
     @property
@@ -118,7 +133,7 @@ class OBSConnection:
                 client = self._req_client
                 if client is None:
                     raise RuntimeError("OBS WebSocket connection unavailable")
-                return await self.hass.async_add_executor_job(func, client)
+                return await self.hass.async_add_executor_job(self._locked_call, func, client)
             except OBSAuthError:
                 # A wrong password won't be fixed by retrying.
                 await self.async_disconnect()
@@ -129,6 +144,11 @@ class OBSConnection:
         assert last_err is not None
         raise last_err
 
+    def _locked_call(self, func: Callable[[Any], _T], client: Any) -> _T:
+        """Run one ReqClient call (in the executor) with the socket to itself."""
+        with self._request_lock:
+            return func(client)
+
     async def async_fetch_data(self) -> dict[str, Any]:
         """Fetch current state using the persistent ReqClient."""
 
@@ -137,6 +157,7 @@ class OBSConnection:
                 "stream_status": client.get_stream_status(),
                 "record_status": client.get_record_status(),
                 "service_settings": client.get_stream_service_settings(),
+                "stats": client.get_stats(),
             }
 
         return await self._async_request(_fetch)
@@ -157,6 +178,23 @@ class OBSConnection:
         """Stop recording in OBS."""
         await self._async_request(lambda client: client.stop_record())
 
+    async def async_get_program_screenshot(self, size: int) -> bytes:
+        """Return a JPEG of the current program scene, its longer side `size` pixels."""
+
+        def _screenshot(client: Any) -> str:
+            scene = client.get_current_program_scene()
+            name = getattr(scene, "scene_name", None) or scene.current_program_scene_name
+            # The protocol documents width/height as a bounding box that keeps
+            # the aspect ratio, but OBS stretches the image to exactly the
+            # size given; derive the other side from the canvas instead.
+            video = client.get_video_settings()
+            width, height = screenshot_size(video.base_width, video.base_height, size)
+            return client.get_source_screenshot(name, "jpg", width, height, SNAPSHOT_QUALITY).image_data
+
+        image_data = await self._async_request(_screenshot)
+        # A data URI: "data:image/jpg;base64,<payload>".
+        return base64.b64decode(image_data.partition(",")[2])
+
     async def async_disconnect(self) -> None:
         """Disconnect both clients."""
 
@@ -169,6 +207,92 @@ class OBSConnection:
             self._req_client = None
 
         await self.hass.async_add_executor_job(_disconnect)
+
+
+def screenshot_size(canvas_width: int, canvas_height: int, size: int) -> tuple[int, int]:
+    """Scale the canvas so its longer side is `size`, within OBS's 8-4096 limits."""
+    scale = size / max(canvas_width, canvas_height)
+    return (
+        min(max(round(canvas_width * scale), 8), 4096),
+        min(max(round(canvas_height * scale), 8), 4096),
+    )
+
+
+def numeric_field(obj: Any, attr: str) -> float | None:
+    """Return a numeric response field, or None when it is missing."""
+    value = getattr(obj, attr, None)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return value
+
+
+def _skipped_pct(prev: dict[str, float | None], cur: dict[str, float | None], prefix: str) -> float | None:
+    """Percent of frames skipped between two samples of a skipped/total counter pair.
+
+    OBS's counters are cumulative (since OBS started, or since the output
+    started), so a since-start ratio hides whether frames are being lost right
+    now. A counter that went backwards was reset (a new stream), so measure
+    from zero. No frames in the window (output not running) gives None.
+    """
+    skipped, total = cur[f"{prefix}_skipped"], cur[f"{prefix}_total"]
+    if skipped is None or total is None:
+        return None
+    prev_skipped, prev_total = prev.get(f"{prefix}_skipped"), prev.get(f"{prefix}_total")
+    if prev_skipped is None or prev_total is None or total < prev_total or skipped < prev_skipped:
+        prev_skipped = prev_total = 0
+    frames = total - prev_total
+    if frames <= 0:
+        return None
+    return round(100 * (skipped - prev_skipped) / frames, 1)
+
+
+class OBSRateTracker:
+    """Turn OBS's cumulative counters into rates over the last poll window.
+
+    Windows shorter than MIN_RATE_INTERVAL (an event refresh right after a
+    poll) keep the previous rates rather than reporting a noisy ratio over a
+    fraction of a second.
+    """
+
+    def __init__(self) -> None:
+        self._baseline: dict[str, float | None] | None = None
+        self._baseline_time = 0.0
+        self.rates: dict[str, float | None] = {}
+
+    def update(self, data: dict[str, Any], now: float) -> dict[str, float | None]:
+        stream, stats = data.get("stream_status"), data.get("stats")
+        streaming = bool(getattr(stream, "output_active", False))
+        cur = {
+            "stream_bytes": numeric_field(stream, "output_bytes"),
+            "stream_skipped": numeric_field(stream, "output_skipped_frames"),
+            "stream_total": numeric_field(stream, "output_total_frames"),
+            "render_skipped": numeric_field(stats, "render_skipped_frames"),
+            "render_total": numeric_field(stats, "render_total_frames"),
+            "lag_skipped": numeric_field(stats, "output_skipped_frames"),
+            "lag_total": numeric_field(stats, "output_total_frames"),
+        }
+        prev = self._baseline
+        elapsed = now - self._baseline_time
+        if prev is not None and elapsed < MIN_RATE_INTERVAL:
+            return self.rates
+
+        bitrate: float | None = None
+        if not streaming:
+            bitrate = 0
+        elif prev is not None and cur["stream_bytes"] is not None:
+            prev_bytes = prev.get("stream_bytes")
+            if prev_bytes is not None and cur["stream_bytes"] >= prev_bytes:
+                bitrate = round((cur["stream_bytes"] - prev_bytes) * 8 / 1000 / elapsed)
+
+        base = prev or {}
+        self.rates = {
+            "stream_bitrate": bitrate,
+            "stream_dropped_pct": _skipped_pct(base, cur, "stream") if streaming else None,
+            "render_skipped_pct": _skipped_pct(base, cur, "render"),
+            "encoding_lag_pct": _skipped_pct(base, cur, "lag"),
+        }
+        self._baseline, self._baseline_time = cur, now
+        return self.rates
 
 
 class OBSCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -189,6 +313,7 @@ class OBSCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.connection = connection
         self._was_available = True
+        self._rates = OBSRateTracker()
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
@@ -224,6 +349,7 @@ class OBSCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self._was_available:
             _LOGGER.info("OBS WebSocket (%s) is available again", self.connection.host)
             self._was_available = True
+        data["rates"] = self._rates.update(data, time.monotonic())
         return data
 
 

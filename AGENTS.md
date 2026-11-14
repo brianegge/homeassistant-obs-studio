@@ -12,13 +12,14 @@ ha-obs-websocket/                # Git repo root (~/dev/ha-obs-websocket)
 │   └── obs_websocket/
 │       ├── __init__.py          # Core: OBSConnection, OBSCoordinator, OBSRuntimeData, OBSConfigEntry
 │       ├── button.py            # Buttons: start/stop stream, start/stop recording
+│       ├── camera.py            # Program snapshot camera (GetSourceScreenshot of the program scene)
 │       ├── config_flow.py       # Config flow: user setup, reauth, reconfigure
 │       ├── const.py             # Constants: DOMAIN, defaults, HEARTBEAT_INTERVAL, PLATFORMS
 │       ├── diagnostics.py       # Diagnostics support
 │       ├── errors.py            # OBSAuthError and is_auth_error (detects a rejected password)
 │       ├── icons.json           # Icon translations (per-state icons for sensors)
 │       ├── manifest.json        # Integration metadata and dependencies
-│       ├── sensor.py            # Sensor entities: OBSStreamStatusSensor, OBSStreamServiceSensor
+│       ├── sensor.py            # Sensor entities: status sensors + description-driven OBSStatSensor
 │       ├── strings.json         # UI localization: config flow, entity names/states, exceptions
 │       └── translations/
 │           └── en.json          # Copy of strings.json; HA only loads translations/ for custom integrations
@@ -49,6 +50,9 @@ ha-obs-websocket/                # Git repo root (~/dev/ha-obs-websocket)
 | `OBSStreamStatusSensor` | `sensor.py` | Stream state sensor (streaming/reconnecting/idle) |
 | `OBSRecordStatusSensor` | `sensor.py` | Recording state sensor (recording/paused/idle) |
 | `OBSStreamServiceSensor` | `sensor.py` | Stream service type and settings sensor (diagnostic) |
+| `OBSRateTracker` | `__init__.py` | Turns OBS's cumulative counters into per-window bitrate and skipped-frame percentages (`data["rates"]`) |
+| `OBSStatSensor` | `sensor.py` | One numeric sensor per `OBSStatSensorEntityDescription` in `STAT_SENSORS` (GetStats, congestion, rates) |
+| `OBSProgramCamera` | `camera.py` | Program snapshot camera, disabled by default |
 | `OBSButton` | `button.py` | One button per `OBSButtonEntityDescription` in `BUTTONS`: start/stop stream, start/stop recording |
 
 ## Important Constants (`const.py`)
@@ -58,13 +62,15 @@ ha-obs-websocket/                # Git repo root (~/dev/ha-obs-websocket)
 - `DEFAULT_PORT = 4455`
 - `HEARTBEAT_INTERVAL = 60` (seconds)
 - `EVENT_REFRESH_COOLDOWN = 0.5` (seconds)
-- `PLATFORMS = ["sensor"]`
+- `MIN_RATE_INTERVAL = 10` (seconds; shortest window for rates)
+- `DEFAULT_SNAPSHOT_SIZE = 1280`, `SNAPSHOT_QUALITY = 80` (program camera)
+- `PLATFORMS = ["button", "camera", "sensor"]`
 
 ## Connection Architecture
 
 The integration uses two persistent `obsws_python` connections:
 
-1. **ReqClient** - Sends requests to OBS (get_stream_status, get_record_status, get_stream_service_settings).
+1. **ReqClient** - Sends requests to OBS (get_stream_status, get_record_status, get_stream_service_settings, get_stats; get_source_screenshot for the camera). obsws-python reads the next reply off the socket without matching request IDs, so every call goes through `OBSConnection._async_request`, which holds `_request_lock` for the duration — never call `_req_client` directly.
 2. **EventClient** - Subclassed to define `on_stream_state_changed` and `on_record_state_changed`, each registered with `callback.register()` (obsws-python only dispatches events to registered functions). The callback calls `coordinator.async_request_refresh()` via `asyncio.run_coroutine_threadsafe`. The coordinator's debouncer (`immediate=True`, `EVENT_REFRESH_COOLDOWN`) refreshes on the first event and coalesces a burst (STARTING then STARTED) into one trailing refresh.
 
 Both clients run in the executor (blocking I/O) and are wrapped with `hass.async_add_executor_job`.
@@ -104,7 +110,7 @@ If OBS rejects the password (at setup or on reconnect), `OBSConnection` raises `
 ### Adding services
 1. Create `services.yaml` with service definitions.
 2. Register services in `async_setup_entry` in `__init__.py` using `hass.services.async_register`.
-3. Use `OBSConnection._req_client` to call OBS WebSocket methods.
+3. Call OBS WebSocket methods through `OBSConnection._async_request` (it serializes requests and reconnects a stale socket).
 
 ### Adding new event listeners
 1. Add new `on_*` methods to the `_Events` subclass inside `OBSConnection.async_connect()` and register each one with `events.callback.register(...)`.
