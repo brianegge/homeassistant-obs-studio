@@ -15,7 +15,7 @@ from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.obs_websocket import OBSRuntimeData
-from custom_components.obs_websocket.const import DOMAIN, EVENT_REFRESH_COOLDOWN
+from custom_components.obs_websocket.const import DOMAIN, EVENT_REFRESH_COOLDOWN, REFRESH_EVENTS
 
 from .conftest import (
     MOCK_CONFIG,
@@ -313,8 +313,8 @@ async def test_coordinator_reconnects_after_disconnect(
         assert connection.connected
 
 
-async def test_stream_state_changed_callback_is_registered(hass: HomeAssistant) -> None:
-    """Test that the stream state callback is registered with obsws-python.
+async def test_refresh_event_callbacks_are_registered(hass: HomeAssistant) -> None:
+    """Test that a refresh callback is registered with obsws-python for each refresh event.
 
     obsws-python only dispatches events to functions registered via ``callback.register()``.
     """
@@ -336,7 +336,8 @@ async def test_stream_state_changed_callback_is_registered(hass: HomeAssistant) 
         connection = entry.runtime_data.connection
         register = connection._event_client.callback.register
         callbacks = {call.args[0].__name__: call.args[0] for call in register.call_args_list}
-        assert set(callbacks) == {"on_stream_state_changed", "on_record_state_changed"}
+        assert set(callbacks) == {f"on_{event}" for event in REFRESH_EVENTS}
+        assert {"on_virtualcam_state_changed", "on_current_program_scene_changed"} <= set(callbacks)
 
         for callback in callbacks.values():
             with patch.object(connection, "_on_event") as on_event:

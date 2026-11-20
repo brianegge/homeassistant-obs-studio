@@ -16,8 +16,10 @@ from .conftest import (
     MOCK_PORT,
     make_event_client_class,
     make_record_status,
+    make_scene_list,
     make_service_settings,
     make_stream_status,
+    make_virtual_cam_status,
 )
 
 
@@ -35,6 +37,8 @@ def _make_req_client() -> MagicMock:
     client.get_stream_status.return_value = make_stream_status(active=True)
     client.get_record_status.return_value = make_record_status(active=True, paused=True)
     client.get_stream_service_settings.return_value = make_service_settings()
+    client.get_scene_list.return_value = make_scene_list(["Starting", "Live"], current="Live")
+    client.get_virtual_cam_status.return_value = make_virtual_cam_status(active=True)
     client.disconnect.return_value = None
     return client
 
@@ -76,6 +80,9 @@ async def test_diagnostics(hass: HomeAssistant) -> None:
     assert result["coordinator"]["data"]["stream_status"]["output_active"] is True
     assert result["coordinator"]["data"]["record_status"]["output_active"] is True
     assert result["coordinator"]["data"]["record_status"]["output_paused"] is True
+
+    assert result["coordinator"]["data"]["scenes"] == {"current": "Live", "names": ["Starting", "Live"]}
+    assert result["coordinator"]["data"]["virtual_cam"] is True
 
     # Stream key should be redacted
     service_settings = result["coordinator"]["data"]["service_settings"]["stream_service_settings"]

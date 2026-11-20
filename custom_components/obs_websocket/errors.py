@@ -18,3 +18,8 @@ class OBSAuthError(Exception):
 def is_auth_error(err: BaseException) -> bool:
     """Return True if an obsws-python error means the password was rejected."""
     return type(err).__name__ == "OBSSDKError" and any(msg in str(err) for msg in _AUTH_ERROR_MESSAGES)
+
+
+def is_request_error(err: BaseException) -> bool:
+    """Return True if OBS answered a request with an error status (e.g. a resource it lacks)."""
+    return type(err).__name__ == "OBSSDKRequestError"

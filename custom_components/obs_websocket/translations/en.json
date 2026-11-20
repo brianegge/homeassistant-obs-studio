@@ -69,6 +69,15 @@
     },
     "stop_record_failed": {
       "message": "Failed to stop recording on OBS at {host}: {error}"
+    },
+    "start_virtual_cam_failed": {
+      "message": "Failed to start the virtual camera on OBS at {host}: {error}"
+    },
+    "stop_virtual_cam_failed": {
+      "message": "Failed to stop the virtual camera on OBS at {host}: {error}"
+    },
+    "set_scene_failed": {
+      "message": "Failed to switch OBS at {host} to scene {scene}: {error}"
     }
   },
   "entity": {
@@ -140,6 +149,16 @@
     "camera": {
       "program": {
         "name": "Program"
+      }
+    },
+    "select": {
+      "scene": {
+        "name": "Scene"
+      }
+    },
+    "switch": {
+      "virtual_camera": {
+        "name": "Virtual camera"
       }
     }
   }
