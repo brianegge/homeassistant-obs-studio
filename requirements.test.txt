@@ -1,2 +1,2 @@
 pytest-homeassistant-custom-component>=0.13.375
-PyTurboJPEG==1.8.3
+PyTurboJPEG==2.6.1
