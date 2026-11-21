@@ -11,7 +11,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from .conftest import MOCK_HOST, NO_VIRTUAL_CAM_ERROR, make_virtual_cam_status
+from .conftest import MOCK_HOST, NO_VIRTUAL_CAM_ERROR, OBSSDKRequestError, make_virtual_cam_status
 
 ENTITY_ID = "switch.obs_studio_192_168_1_100_virtual_camera"
 
@@ -120,6 +120,90 @@ async def test_switch_unavailable_without_virtual_cam(
     mock_req_client.get_virtual_cam_status.side_effect = None
     mock_req_client.get_virtual_cam_status.return_value = make_virtual_cam_status(active=True)
     await mock_config_entry.runtime_data.connection.async_disconnect()
+    await _refresh(hass, mock_config_entry)
+    assert hass.states.get(ENTITY_ID).state == STATE_ON
+
+
+@pytest.mark.parametrize(
+    ("service", "method", "request_type", "code"),
+    [
+        ("turn_on", "start_virtual_cam", "StartVirtualCam", 500),
+        ("turn_off", "stop_virtual_cam", "StopVirtualCam", 501),
+    ],
+)
+async def test_switch_already_in_state_is_success(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_req_client: MagicMock,
+    mock_obsws: MagicMock,
+    service: str,
+    method: str,
+    request_type: str,
+    code: int,
+) -> None:
+    """OBS answering "already running" to a start, or "not running" to a stop, is not a failure.
+
+    The request is sent once on the same connection, and the state is refreshed.
+    """
+    await _setup(hass, mock_config_entry)
+    getattr(mock_req_client, method).side_effect = OBSSDKRequestError(request_type, code)
+    polls = mock_req_client.get_virtual_cam_status.call_count
+
+    await hass.services.async_call("switch", service, {"entity_id": ENTITY_ID}, blocking=True)
+    await hass.async_block_till_done()
+
+    getattr(mock_req_client, method).assert_called_once_with()
+    mock_req_client.disconnect.assert_not_called()
+    mock_obsws.ReqClient.assert_called_once()
+    assert mock_req_client.get_virtual_cam_status.call_count > polls
+
+
+@pytest.mark.parametrize(
+    ("service", "method", "request_type", "code"),
+    [
+        # The codes swapped: neither means "already in the state asked for".
+        ("turn_on", "start_virtual_cam", "StartVirtualCam", 501),
+        ("turn_off", "stop_virtual_cam", "StopVirtualCam", 500),
+        ("turn_on", "start_virtual_cam", "StartVirtualCam", 604),
+    ],
+)
+async def test_switch_other_request_error_fails_without_reconnect(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_req_client: MagicMock,
+    mock_obsws: MagicMock,
+    service: str,
+    method: str,
+    request_type: str,
+    code: int,
+) -> None:
+    """Any other request error is raised, but OBS answered, so the connection is kept and not retried."""
+    await _setup(hass, mock_config_entry)
+    getattr(mock_req_client, method).side_effect = OBSSDKRequestError(request_type, code)
+
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call("switch", service, {"entity_id": ENTITY_ID}, blocking=True)
+
+    getattr(mock_req_client, method).assert_called_once_with()
+    mock_req_client.disconnect.assert_not_called()
+    mock_obsws.ReqClient.assert_called_once()
+    assert mock_config_entry.runtime_data.connection.connected
+
+
+@pytest.mark.usefixtures("mock_obsws")
+async def test_virtual_cam_passing_request_error_does_not_disable_switch(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, mock_req_client: MagicMock
+) -> None:
+    """Only "no virtual camera" stops the polling; NotReady fails one poll and the next asks again."""
+    await _setup(hass, mock_config_entry)
+
+    mock_req_client.get_virtual_cam_status.side_effect = OBSSDKRequestError("GetVirtualCamStatus", 207)
+    await _refresh(hass, mock_config_entry)
+    assert not mock_config_entry.runtime_data.coordinator.last_update_success
+    assert mock_config_entry.runtime_data.connection.connected
+
+    mock_req_client.get_virtual_cam_status.side_effect = None
+    mock_req_client.get_virtual_cam_status.return_value = make_virtual_cam_status(active=True)
     await _refresh(hass, mock_config_entry)
     assert hass.states.get(ENTITY_ID).state == STATE_ON
 

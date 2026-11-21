@@ -92,7 +92,7 @@ Both clients run in the executor (blocking I/O) and are wrapped with `hass.async
 
 Coordinator data shape: the raw obsws-python responses under `stream_status`, `record_status`, `service_settings` and `stats`, plus normalised values:
 - `scenes`: `{"current": str | None, "names": [str, ...]}` from `parse_scene_list()`. OBS returns scenes bottom first (sceneIndex 0 is the last scene in the dock), so names are sorted by sceneIndex descending to match the Scenes dock.
-- `virtual_cam`: `True`/`False`, or `None` when OBS has no virtual camera. OBS answers GetVirtualCamStatus with a request error in that case; `_fetch_virtual_cam()` catches only that (`is_request_error`), sets `_virtual_cam_supported = False` so it is not asked again (obsws-python logs every failed request), and `async_connect()` resets the flag.
+- `virtual_cam`: `True`/`False`, or `None` when OBS has no virtual camera. OBS answers GetVirtualCamStatus with request error 604 (InvalidResourceState) in that case; `_fetch_virtual_cam()` catches only that code (`request_error_code`), sets `_virtual_cam_supported = False` so it is not asked again (obsws-python logs every failed request), and `async_connect()` resets the flag.
 - `rates`: from `OBSRateTracker`.
 
 When the connection drops, the coordinator logs a warning, marks entities unavailable (via `UpdateFailed`), and reconnects on the next poll cycle.

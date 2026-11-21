@@ -182,7 +182,7 @@ The switch is **unavailable** when OBS has no virtual camera. On Linux that usua
 
 Shows the scene OBS is sending to program (the stream, recording and virtual camera) and lets you switch to another one. The options are the scenes in the current scene collection, in the same order as the OBS Scenes dock, and they update straight away when you add, remove or rename a scene or change scene collection. Switching uses OBS's current transition.
 
-In studio mode, choosing a scene sends it straight to program; the preview scene is not shown or changed.
+In studio mode, choosing a scene sends it straight to program. If **Swap Preview/Output Scenes After Transitioning** is enabled, the previous program scene replaces the preview scene after the transition.
 
 ## Configuration
 

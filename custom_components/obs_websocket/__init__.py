@@ -28,7 +28,15 @@ from .const import (
     REFRESH_EVENTS,
     SNAPSHOT_QUALITY,
 )
-from .errors import OBSAuthError, is_auth_error, is_request_error
+from .errors import (
+    INVALID_RESOURCE_STATE,
+    OUTPUT_NOT_RUNNING,
+    OUTPUT_RUNNING,
+    OBSAuthError,
+    is_auth_error,
+    is_request_error,
+    request_error_code,
+)
 
 
 @dataclass
@@ -131,6 +139,9 @@ class OBSConnection:
         the call, and on any failure drop the client, reconnect, and retry
         once. That turns a stale socket into a completed request rather than a
         command that is silently dropped while the sensors still read fine.
+
+        A request error is the exception: OBS answered, so the socket is fine
+        and asking again would get the same answer. It is raised as is.
         """
         last_err: Exception | None = None
         for _attempt in range(2):
@@ -145,7 +156,9 @@ class OBSConnection:
                 # A wrong password won't be fixed by retrying.
                 await self.async_disconnect()
                 raise
-            except Exception as err:  # reconnect on any failure
+            except Exception as err:  # reconnect on any failure but a request error
+                if is_request_error(err):
+                    raise
                 last_err = err
                 await self.async_disconnect()
         assert last_err is not None
@@ -174,17 +187,19 @@ class OBSConnection:
     def _fetch_virtual_cam(self, client: Any) -> bool | None:
         """Return whether the virtual camera is on, or None if OBS has none.
 
-        OBS answers GetVirtualCamStatus with an error when it has no virtual
-        camera (on Linux, without the v4l2loopback module). obsws-python logs
-        every failed request as an error, so stop asking until the next
-        reconnect rather than logging it on every poll.
+        OBS answers GetVirtualCamStatus with InvalidResourceState when it has
+        no virtual camera (on Linux, without the v4l2loopback module).
+        obsws-python logs every failed request as an error, so stop asking
+        until the next reconnect rather than logging it on every poll. Any
+        other request error (NotReady while a scene collection is switching,
+        say) is passing, so it fails this poll and the next one asks again.
         """
         if not self._virtual_cam_supported:
             return None
         try:
             return bool_field(client.get_virtual_cam_status(), "output_active")
         except Exception as err:
-            if not is_request_error(err):
+            if request_error_code(err) != INVALID_RESOURCE_STATE:
                 raise
             _LOGGER.info("OBS at %s has no virtual camera: %s", self.host, err)
             self._virtual_cam_supported = False
@@ -208,11 +223,23 @@ class OBSConnection:
 
     async def async_start_virtual_cam(self) -> None:
         """Start the OBS virtual camera."""
-        await self._async_request(lambda client: client.start_virtual_cam())
+        await self._async_request_unless(OUTPUT_RUNNING, lambda client: client.start_virtual_cam())
 
     async def async_stop_virtual_cam(self) -> None:
         """Stop the OBS virtual camera."""
-        await self._async_request(lambda client: client.stop_virtual_cam())
+        await self._async_request_unless(OUTPUT_NOT_RUNNING, lambda client: client.stop_virtual_cam())
+
+    async def _async_request_unless(self, done_code: int, func: Callable[[Any], Any]) -> None:
+        """Run a command, counting OBS's `done_code` answer as success.
+
+        `done_code` is the request error OBS gives when it is already in the
+        state the command asks for, such as OutputRunning for a start.
+        """
+        try:
+            await self._async_request(func)
+        except Exception as err:
+            if request_error_code(err) != done_code:
+                raise
 
     async def async_set_program_scene(self, scene: str) -> None:
         """Switch the OBS program output to `scene`."""
@@ -399,7 +426,9 @@ class OBSCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 translation_placeholders={"host": self.connection.host},
             ) from err
         except Exception as err:
-            await self.connection.async_disconnect()
+            # A request error means OBS answered: the connection is still good.
+            if not is_request_error(err):
+                await self.connection.async_disconnect()
             if self._was_available:
                 _LOGGER.warning(
                     "OBS WebSocket (%s) is unavailable: %s",

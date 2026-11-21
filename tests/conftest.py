@@ -144,11 +144,17 @@ def make_virtual_cam_status(*, active: bool = False) -> SimpleNamespace:
 class OBSSDKRequestError(Exception):
     """Stand-in for obsws_python.error.OBSSDKRequestError (matched by class name)."""
 
+    def __init__(self, req_name: str, code: int, comment: str | None = None) -> None:
+        self.req_name = req_name
+        self.code = code
+        message = f"Request {req_name} returned code {code}."
+        if comment:
+            message += f" With message: {comment}"
+        super().__init__(message)
+
 
 # What OBS answers GetVirtualCamStatus with when it has no virtual camera.
-NO_VIRTUAL_CAM_ERROR = OBSSDKRequestError(
-    "Request GetVirtualCamStatus returned code 604. With message: VirtualCam is not available."
-)
+NO_VIRTUAL_CAM_ERROR = OBSSDKRequestError("GetVirtualCamStatus", 604, "VirtualCam is not available.")
 
 
 def make_event_client_class() -> type:
