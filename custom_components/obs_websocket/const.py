@@ -27,17 +27,38 @@ SNAPSHOT_QUALITY: Final = 80
 
 PLATFORMS: Final[list[str]] = ["button", "camera", "select", "sensor", "switch"]
 
-# OBS events (snake_case, as obsws-python names them) that trigger a refresh.
-# Scene collection changes fire a burst of scene created/removed events; the
-# debounced refresh coalesces them.
+# OBS events the integration listens for (snake_case, as obsws-python names
+# them), grouped by what each costs. A scene cut can happen every few seconds,
+# so it must not run the full poll.
+
+# Output state changes: a full poll, debounced.
 REFRESH_EVENTS: Final[tuple[str, ...]] = (
     "stream_state_changed",
     "record_state_changed",
     "virtualcam_state_changed",
-    "current_program_scene_changed",
+)
+
+# Carries the new scene name, so no request is needed.
+EVENT_PROGRAM_SCENE_CHANGED: Final = "current_program_scene_changed"
+
+# OBS answers every request with NotReady from this event until
+# current_scene_collection_changed.
+EVENT_SCENE_COLLECTION_CHANGING: Final = "current_scene_collection_changing"
+EVENT_SCENE_COLLECTION_CHANGED: Final = "current_scene_collection_changed"
+
+# The scene list changed: fetch only GetSceneList, debounced. A scene
+# collection change fires a burst of scene created/removed events.
+SCENE_LIST_EVENTS: Final[tuple[str, ...]] = (
     "scene_list_changed",
     "scene_created",
     "scene_removed",
     "scene_name_changed",
-    "current_scene_collection_changed",
+    EVENT_SCENE_COLLECTION_CHANGED,
+)
+
+OBS_EVENTS: Final[tuple[str, ...]] = (
+    *REFRESH_EVENTS,
+    EVENT_PROGRAM_SCENE_CHANGED,
+    EVENT_SCENE_COLLECTION_CHANGING,
+    *SCENE_LIST_EVENTS,
 )

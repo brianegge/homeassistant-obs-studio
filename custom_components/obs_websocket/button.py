@@ -7,13 +7,10 @@ from dataclasses import dataclass
 
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import OBSConfigEntry, OBSConnection, OBSCoordinator
-from .const import DOMAIN
+from .entity import OBSEntity
 
 PARALLEL_UPDATES = 1
 
@@ -62,10 +59,9 @@ async def async_setup_entry(
     async_add_entities(OBSButton(coordinator, entry, description) for description in BUTTONS)
 
 
-class OBSButton(CoordinatorEntity[OBSCoordinator], ButtonEntity):
+class OBSButton(OBSEntity, ButtonEntity):
     """A button that sends one request to OBS."""
 
-    _attr_has_entity_name = True
     entity_description: OBSButtonEntityDescription
 
     def __init__(
@@ -75,27 +71,11 @@ class OBSButton(CoordinatorEntity[OBSCoordinator], ButtonEntity):
         description: OBSButtonEntityDescription,
     ) -> None:
         """Initialize."""
-        super().__init__(coordinator)
+        super().__init__(coordinator, entry)
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=f"OBS Studio ({entry.data['host']})",
-            manufacturer="OBS Project",
-            sw_version=None,
-        )
-        self._connection = coordinator.connection
 
     async def async_press(self) -> None:
         """Send the button's request to OBS."""
-        try:
-            await self.entity_description.press_fn(self._connection)
-        except Exception as err:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key=self.entity_description.error_key,
-                translation_placeholders={
-                    "host": self._connection.host,
-                    "error": str(err),
-                },
-            ) from err
+        description = self.entity_description
+        await self._async_send(description.press_fn(self.coordinator.connection), description.error_key)

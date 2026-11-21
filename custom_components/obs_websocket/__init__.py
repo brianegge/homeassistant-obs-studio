@@ -14,18 +14,22 @@ from datetime import timedelta
 from typing import Any, TypeVar
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
     DOMAIN,
+    EVENT_PROGRAM_SCENE_CHANGED,
     EVENT_REFRESH_COOLDOWN,
+    EVENT_SCENE_COLLECTION_CHANGED,
+    EVENT_SCENE_COLLECTION_CHANGING,
     HEARTBEAT_INTERVAL,
     MIN_RATE_INTERVAL,
+    OBS_EVENTS,
     PLATFORMS,
-    REFRESH_EVENTS,
+    SCENE_LIST_EVENTS,
     SNAPSHOT_QUALITY,
 )
 from .errors import (
@@ -53,6 +57,9 @@ _LOGGER = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 
+# Returns a changed copy of the coordinator data.
+type _Patch = Callable[[dict[str, Any]], dict[str, Any]]
+
 
 class OBSConnection:
     """Persistent OBS WebSocket connection with event-driven updates."""
@@ -69,8 +76,13 @@ class OBSConnection:
         # on the one socket (a poll and a button press or camera snapshot) can
         # swap replies. Serialize them.
         self._request_lock = threading.Lock()
+        # A command, its follow-up and an event refresh can all find the
+        # connection down at once (after an OBS restart, say). Without this
+        # each would connect, and the EventClient of every pair but the last
+        # would be left running with nothing to close it.
+        self._connect_lock = asyncio.Lock()
         self._virtual_cam_supported = True
-        self.coordinator: DataUpdateCoordinator[dict[str, Any]] | None = None
+        self.coordinator: OBSCoordinator | None = None
 
     @property
     def connected(self) -> bool:
@@ -100,7 +112,7 @@ class OBSConnection:
             events = obs.EventClient(**conn._get_kwargs())
             # obsws-python only dispatches events to functions registered via
             # callback.register(), matching them by __name__ ("on_<event>").
-            for event in REFRESH_EVENTS:
+            for event in OBS_EVENTS:
                 events.callback.register(conn._make_event_handler(event))
             conn._event_client = events
 
@@ -115,17 +127,17 @@ class OBSConnection:
         """Return a callback that obsws-python dispatches for `event`."""
 
         def handler(data: Any) -> None:
-            self._on_event()
+            self._on_event(event, data)
 
         handler.__name__ = f"on_{event}"
         return handler
 
-    def _on_event(self) -> None:
-        """Handle OBS event from EventClient thread."""
+    def _on_event(self, event: str, data: Any = None) -> None:
+        """Hand an OBS event from the EventClient thread to the coordinator."""
         if self.coordinator is None:
             return
         asyncio.run_coroutine_threadsafe(
-            self.coordinator.async_request_refresh(),
+            self.coordinator.async_handle_event(event, data),
             self.hass.loop,
         )
 
@@ -147,7 +159,10 @@ class OBSConnection:
         for _attempt in range(2):
             try:
                 if self._req_client is None:
-                    await self.async_connect()
+                    async with self._connect_lock:
+                        # Whoever held the lock may have connected already.
+                        if self._req_client is None:
+                            await self.async_connect()
                 client = self._req_client
                 if client is None:
                     raise RuntimeError("OBS WebSocket connection unavailable")
@@ -183,6 +198,10 @@ class OBSConnection:
             }
 
         return await self._async_request(_fetch)
+
+    async def async_fetch_scenes(self) -> dict[str, Any]:
+        """Fetch only the scene list and the current program scene."""
+        return await self._async_request(lambda client: parse_scene_list(client.get_scene_list()))
 
     def _fetch_virtual_cam(self, client: Any) -> bool | None:
         """Return whether the virtual camera is on, or None if OBS has none.
@@ -411,8 +430,103 @@ class OBSCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.connection = connection
         self._was_available = True
         self._rates = OBSRateTracker()
+        self._polling = False
+        self._deferred: list[_Patch] = []
+        self._collection_switching = False
+        self._scene_refresh = Debouncer(
+            hass,
+            _LOGGER,
+            cooldown=EVENT_REFRESH_COOLDOWN,
+            immediate=True,
+            function=self._async_refresh_scenes,
+        )
+
+    async def async_shutdown(self) -> None:
+        """Cancel the poll and any pending scene list refresh."""
+        await super().async_shutdown()
+        self._scene_refresh.async_shutdown()
+
+    async def async_handle_event(self, event: str, data: Any = None) -> None:
+        """Act on an OBS event with the least work that keeps the data right."""
+        if event == EVENT_SCENE_COLLECTION_CHANGING:
+            self._collection_switching = True
+        elif event == EVENT_PROGRAM_SCENE_CHANGED and isinstance(name := getattr(data, "scene_name", None), str):
+            await self.async_program_scene_changed(name)
+        elif event in SCENE_LIST_EVENTS:
+            if event == EVENT_SCENE_COLLECTION_CHANGED:
+                self._collection_switching = False
+            await self._scene_refresh.async_call()
+        else:
+            await self.async_request_refresh()
+
+    async def async_program_scene_changed(self, name: str) -> None:
+        """Record the program scene OBS reported, or a command just set."""
+        await self._async_patch_or_refresh(lambda data: {**data, "scenes": {**data.get("scenes", {}), "current": name}})
+
+    async def async_virtual_cam_changed(self, active: bool) -> None:
+        """Record the virtual camera state a command just set.
+
+        OBS answers start and stop before it has acted on them, so a poll
+        right after the command could read the old state.
+        """
+        await self._async_patch_or_refresh(lambda data: {**data, "virtual_cam": active})
+
+    async def _async_refresh_scenes(self) -> None:
+        """Fetch the scene list on its own, leaving the rest of the data as it is."""
+        if self._collection_switching:
+            # OBS would only answer NotReady; current_scene_collection_changed follows.
+            return
+        if self.data is None or not self.last_update_success:
+            await self.async_request_refresh()
+            return
+        try:
+            scenes = await self.connection.async_fetch_scenes()
+        except Exception as err:
+            if is_request_error(err):
+                # OBS answered but had no list to give. Entities stay as they
+                # are; the next scene event or poll fetches it.
+                _LOGGER.debug("OBS at %s could not list its scenes: %s", self.connection.host, err)
+                return
+            # The connection is gone: let the poll report it and reconnect.
+            await self.async_request_refresh()
+            return
+        await self._async_patch_or_refresh(lambda data: {**data, "scenes": scenes})
+
+    async def _async_patch_or_refresh(self, patch: _Patch) -> None:
+        """Change part of the data without a poll, or poll if that is not possible."""
+        if not self._async_patch(patch):
+            await self.async_request_refresh()
+
+    @callback
+    def _async_patch(self, patch: _Patch) -> bool:
+        """Apply `patch` to the data and tell the entities. False if only a poll will do.
+
+        This is not async_set_updated_data(): that restarts the heartbeat
+        timer, so scene cuts closer together than the heartbeat would keep
+        the poll from ever running.
+        """
+        if self._polling:
+            # The poll may already have read what this replaces; apply it on top.
+            self._deferred.append(patch)
+            return True
+        if self.data is None or not self.last_update_success:
+            return False
+        self.data = patch(self.data)
+        self.async_update_listeners()
+        return True
 
     async def _async_update_data(self) -> dict[str, Any]:
+        self._polling = True
+        try:
+            data = await self._async_poll()
+            for patch in self._deferred:
+                data = patch(data)
+            return data
+        finally:
+            self._polling = False
+            self._deferred.clear()
+
+    async def _async_poll(self) -> dict[str, Any]:
         try:
             # async_fetch_data connects if needed and reconnects on a stale
             # socket, so no separate connect guard is required here.
@@ -429,6 +543,7 @@ class OBSCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # A request error means OBS answered: the connection is still good.
             if not is_request_error(err):
                 await self.connection.async_disconnect()
+                self._collection_switching = False
             if self._was_available:
                 _LOGGER.warning(
                     "OBS WebSocket (%s) is unavailable: %s",
@@ -448,6 +563,8 @@ class OBSCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self._was_available:
             _LOGGER.info("OBS WebSocket (%s) is available again", self.connection.host)
             self._was_available = True
+        # OBS answered everything, so it is not mid scene collection switch.
+        self._collection_switching = False
         data["rates"] = self._rates.update(data, time.monotonic())
         return data
 

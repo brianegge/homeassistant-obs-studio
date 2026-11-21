@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import OBSConfigEntry, OBSCoordinator
-from .const import DOMAIN
+from .entity import OBSEntity
 
 PARALLEL_UPDATES = 1
 
@@ -25,26 +21,19 @@ async def async_setup_entry(
     async_add_entities([OBSVirtualCameraSwitch(entry.runtime_data.coordinator, entry)])
 
 
-class OBSVirtualCameraSwitch(CoordinatorEntity[OBSCoordinator], SwitchEntity):
+class OBSVirtualCameraSwitch(OBSEntity, SwitchEntity):
     """Turns the OBS virtual camera on and off.
 
     Unavailable when OBS has no virtual camera (for example on Linux without
     the v4l2loopback module).
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "virtual_camera"
 
     def __init__(self, coordinator: OBSCoordinator, entry: OBSConfigEntry) -> None:
         """Initialize."""
-        super().__init__(coordinator)
+        super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_virtual_camera"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=f"OBS Studio ({entry.data['host']})",
-            manufacturer="OBS Project",
-            sw_version=None,
-        )
 
     @property
     def available(self) -> bool:
@@ -59,20 +48,10 @@ class OBSVirtualCameraSwitch(CoordinatorEntity[OBSCoordinator], SwitchEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Start the virtual camera."""
         await self._async_send(self.coordinator.connection.async_start_virtual_cam(), "start_virtual_cam_failed")
+        # OBS also sends VirtualcamStateChanged, which polls; this covers a missed event.
+        await self.coordinator.async_virtual_cam_changed(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Stop the virtual camera."""
         await self._async_send(self.coordinator.connection.async_stop_virtual_cam(), "stop_virtual_cam_failed")
-
-    async def _async_send(self, request: Awaitable[None], error_key: str) -> None:
-        connection = self.coordinator.connection
-        try:
-            await request
-        except Exception as err:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key=error_key,
-                translation_placeholders={"host": connection.host, "error": str(err)},
-            ) from err
-        # OBS also sends VirtualcamStateChanged; this covers a missed event.
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_virtual_cam_changed(False)

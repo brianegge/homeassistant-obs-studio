@@ -38,6 +38,7 @@ This custom Home Assistant integration connects to OBS Studio via the [WebSocket
        ├── config_flow.py
        ├── const.py
        ├── diagnostics.py
+       ├── entity.py
        ├── errors.py
        ├── icons.json
        ├── manifest.json
@@ -198,12 +199,12 @@ After initial setup, you can reconfigure the connection (host, port, password) v
 
 The integration maintains a persistent WebSocket connection to OBS with two update mechanisms:
 
-- **Event-driven (primary):** The `EventClient` listens for stream, recording, virtual camera and scene events from OBS (`StreamStateChanged`, `RecordStateChanged`, `VirtualcamStateChanged`, `CurrentProgramSceneChanged`, and the scene list, rename and scene collection events), triggering an immediate refresh when any of them change.
+- **Event-driven (primary):** The `EventClient` listens for stream, recording, virtual camera and scene events from OBS (`StreamStateChanged`, `RecordStateChanged`, `VirtualcamStateChanged`, `CurrentProgramSceneChanged`, and the scene list, rename and scene collection events) and updates as soon as one arrives. Stream, recording and virtual camera events trigger a full refresh. A scene change is taken straight from the event, and a scene list change re-reads only the scene list, so cutting between scenes often does not make Home Assistant re-read everything each time.
 - **Heartbeat poll (fallback):** A `DataUpdateCoordinator` polls OBS every **60 seconds** to sync state in case an event is missed or the connection was briefly interrupted.
 
 The performance and stream-health sensors update on the same poll (and on stream/record events), so their resolution is about a minute. The program camera fetches a new screenshot on demand instead.
 
-The switch and the scene select also refresh right after a command succeeds, so they settle even if OBS's event is missed.
+The switch and the scene select show the new state as soon as OBS accepts a command, so they settle even if OBS's event is missed. The next poll confirms it.
 
 Requests are sent one at a time over the connection: `obsws-python` does not match replies to request IDs, so overlapping requests (a poll, a button press, a camera snapshot) could otherwise receive each other's replies.
 
@@ -341,7 +342,7 @@ automation:
 | State doesn't update immediately | Verify OBS is version 28+. Older versions may not emit WebSocket v5 events. The fallback poll interval is 60 seconds. |
 | Integration won't load after HA update | Check the Home Assistant logs for errors. You may need to update the `obsws-python` dependency or the integration code. |
 | Virtual camera switch is unavailable | OBS has no virtual camera. On Linux, install and load `v4l2loopback`, then restart OBS. The switch becomes available after the integration reconnects (within about a minute), or reload the integration to pick it up straight away. |
-| Scene select shows "unknown" | OBS reported a program scene that is not in the scene list, which can happen for a moment while switching scene collections. It corrects itself on the next refresh. |
+| Scene select shows "unknown" | OBS reported a program scene that is not in the scene list, which can happen for a moment while switching scene collections. It corrects itself when the switch finishes. |
 | Password changed in OBS | Home Assistant shows a **Re-authenticate** prompt under **Settings > Devices & Services**; enter the new password there. To change the host or port as well, use **(three-dot menu) > Reconfigure**. |
 
 ## Dependencies

@@ -25,7 +25,6 @@ from .conftest import (
     MOCK_CONFIG,
     MOCK_HOST,
     MOCK_PORT,
-    make_event_client_class,
     make_record_status,
     make_service_settings,
     make_stats,
@@ -60,7 +59,6 @@ def _req_client(**stream: Any) -> MagicMock:
 async def _setup(hass: HomeAssistant, client: MagicMock, *, enable: tuple[str, ...] = ()) -> MockConfigEntry:
     mock_obs = MagicMock()
     mock_obs.ReqClient.return_value = client
-    mock_obs.EventClient = make_event_client_class()
     entry = MockConfigEntry(
         domain=DOMAIN, title=MOCK_HOST, data=MOCK_CONFIG.copy(), unique_id=f"{MOCK_HOST}:{MOCK_PORT}"
     )

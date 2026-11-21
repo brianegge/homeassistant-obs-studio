@@ -14,7 +14,6 @@ from .conftest import (
     MOCK_CONFIG,
     MOCK_HOST,
     MOCK_PORT,
-    make_event_client_class,
     make_record_status,
     make_scene_list,
     make_service_settings,
@@ -27,7 +26,6 @@ def _make_mock_obs(req_client: MagicMock) -> MagicMock:
     """Create a mock obsws_python module."""
     mock_obs = MagicMock()
     mock_obs.ReqClient.return_value = req_client
-    mock_obs.EventClient = make_event_client_class()
     return mock_obs
 
 

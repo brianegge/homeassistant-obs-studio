@@ -6,12 +6,11 @@ import logging
 
 from homeassistant.components.camera import Camera
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import OBSConfigEntry, OBSCoordinator
-from .const import DEFAULT_SNAPSHOT_SIZE, DOMAIN
+from .const import DEFAULT_SNAPSHOT_SIZE
+from .entity import OBSEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,7 +28,7 @@ async def async_setup_entry(
     async_add_entities([OBSProgramCamera(entry.runtime_data.coordinator, entry)])
 
 
-class OBSProgramCamera(CoordinatorEntity[OBSCoordinator], Camera):
+class OBSProgramCamera(OBSEntity, Camera):
     """Still image of what OBS is sending to program (the stream and recording).
 
     Each image is a GetSourceScreenshot of the current program scene, taken
@@ -37,22 +36,15 @@ class OBSProgramCamera(CoordinatorEntity[OBSCoordinator], Camera):
     screenshot costs OBS some GPU time, so the entity is disabled by default.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "program"
     _attr_entity_registry_enabled_default = False
     _attr_content_type = "image/jpeg"
 
     def __init__(self, coordinator: OBSCoordinator, entry: OBSConfigEntry) -> None:
         """Initialize."""
-        CoordinatorEntity.__init__(self, coordinator)
+        OBSEntity.__init__(self, coordinator, entry)
         Camera.__init__(self)
         self._attr_unique_id = f"{entry.entry_id}_program"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=f"OBS Studio ({entry.data['host']})",
-            manufacturer="OBS Project",
-            sw_version=None,
-        )
 
     async def async_camera_image(self, width: int | None = None, height: int | None = None) -> bytes | None:
         """Return a JPEG of the program scene, scaled to fit the requested size."""

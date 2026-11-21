@@ -60,7 +60,13 @@ async def test_switch_sends_request(
     service: str,
     method: str,
 ) -> None:
-    """Turning the switch on or off starts or stops the virtual camera, then refreshes."""
+    """Turning the switch on or off starts or stops the virtual camera and shows the new state.
+
+    OBS answers before it has acted, so the state is not read back: a poll
+    here would still see the old one and flip the switch back.
+    """
+    was_on = service == "turn_off"
+    mock_req_client.get_virtual_cam_status.return_value = make_virtual_cam_status(active=was_on)
     await _setup(hass, mock_config_entry)
     polls = mock_req_client.get_virtual_cam_status.call_count
 
@@ -68,7 +74,8 @@ async def test_switch_sends_request(
     await hass.async_block_till_done()
 
     getattr(mock_req_client, method).assert_called_once_with()
-    assert mock_req_client.get_virtual_cam_status.call_count > polls
+    assert hass.states.get(ENTITY_ID).state == (STATE_OFF if was_on else STATE_ON)
+    assert mock_req_client.get_virtual_cam_status.call_count == polls
 
 
 @pytest.mark.usefixtures("mock_obsws")
@@ -143,11 +150,12 @@ async def test_switch_already_in_state_is_success(
 ) -> None:
     """OBS answering "already running" to a start, or "not running" to a stop, is not a failure.
 
-    The request is sent once on the same connection, and the state is refreshed.
+    The request is sent once on the same connection, and the switch shows the state OBS is in.
     """
+    was_on = service == "turn_off"
+    mock_req_client.get_virtual_cam_status.return_value = make_virtual_cam_status(active=was_on)
     await _setup(hass, mock_config_entry)
     getattr(mock_req_client, method).side_effect = OBSSDKRequestError(request_type, code)
-    polls = mock_req_client.get_virtual_cam_status.call_count
 
     await hass.services.async_call("switch", service, {"entity_id": ENTITY_ID}, blocking=True)
     await hass.async_block_till_done()
@@ -155,7 +163,7 @@ async def test_switch_already_in_state_is_success(
     getattr(mock_req_client, method).assert_called_once_with()
     mock_req_client.disconnect.assert_not_called()
     mock_obsws.ReqClient.assert_called_once()
-    assert mock_req_client.get_virtual_cam_status.call_count > polls
+    assert hass.states.get(ENTITY_ID).state == (STATE_OFF if was_on else STATE_ON)
 
 
 @pytest.mark.parametrize(
