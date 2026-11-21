@@ -56,6 +56,10 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: OBSConf
         stats = coordinator.data.get("stats")
         if stats:
             coordinator_data["stats"] = {field: getattr(stats, field, None) for field in STATS_FIELDS}
+        if "scenes" in coordinator.data:
+            coordinator_data["scenes"] = dict(coordinator.data["scenes"])
+        if "virtual_cam" in coordinator.data:
+            coordinator_data["virtual_cam"] = coordinator.data["virtual_cam"]
         if "rates" in coordinator.data:
             coordinator_data["rates"] = dict(coordinator.data["rates"])
         if service_settings:

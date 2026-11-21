@@ -69,6 +69,20 @@
       "program": {
         "default": "mdi:monitor-eye"
       }
+    },
+    "select": {
+      "scene": {
+        "default": "mdi:filmstrip-box-multiple"
+      }
+    },
+    "switch": {
+      "virtual_camera": {
+        "default": "mdi:webcam",
+        "state": {
+          "on": "mdi:webcam",
+          "off": "mdi:webcam-off"
+        }
+      }
     }
   }
 }

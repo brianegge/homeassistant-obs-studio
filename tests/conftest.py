@@ -120,6 +120,37 @@ def make_service_settings(
     )
 
 
+def make_scene_list(names: list[str], *, current: str | None = None) -> SimpleNamespace:
+    """Create a mock GetSceneList response, `names` in Scenes dock order (top first).
+
+    Like OBS, the response lists scenes bottom first, with sceneIndex 0 for the last.
+    """
+    count = len(names)
+    scenes = [
+        {"sceneIndex": count - 1 - i, "sceneName": name, "sceneUuid": f"uuid-{i}"} for i, name in enumerate(names)
+    ]
+    return SimpleNamespace(
+        current_program_scene_name=current if current is not None else (names[0] if names else None),
+        current_preview_scene_name=None,
+        scenes=list(reversed(scenes)),
+    )
+
+
+def make_virtual_cam_status(*, active: bool = False) -> SimpleNamespace:
+    """Create a mock GetVirtualCamStatus response."""
+    return SimpleNamespace(output_active=active)
+
+
+class OBSSDKRequestError(Exception):
+    """Stand-in for obsws_python.error.OBSSDKRequestError (matched by class name)."""
+
+
+# What OBS answers GetVirtualCamStatus with when it has no virtual camera.
+NO_VIRTUAL_CAM_ERROR = OBSSDKRequestError(
+    "Request GetVirtualCamStatus returned code 604. With message: VirtualCam is not available."
+)
+
+
 def make_event_client_class() -> type:
     """Create a stand-in for obsws_python.EventClient, which the integration subclasses."""
 
@@ -152,6 +183,8 @@ def mock_req_client() -> MagicMock:
     client.get_record_status.return_value = make_record_status()
     client.get_stream_service_settings.return_value = make_service_settings()
     client.get_stats.return_value = make_stats()
+    client.get_scene_list.return_value = make_scene_list(["Starting", "Live", "BRB"], current="Live")
+    client.get_virtual_cam_status.return_value = make_virtual_cam_status()
     client.disconnect.return_value = None
     return client
 

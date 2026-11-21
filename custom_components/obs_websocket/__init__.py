@@ -25,9 +25,10 @@ from .const import (
     HEARTBEAT_INTERVAL,
     MIN_RATE_INTERVAL,
     PLATFORMS,
+    REFRESH_EVENTS,
     SNAPSHOT_QUALITY,
 )
-from .errors import OBSAuthError, is_auth_error
+from .errors import OBSAuthError, is_auth_error, is_request_error
 
 
 @dataclass
@@ -60,6 +61,7 @@ class OBSConnection:
         # on the one socket (a poll and a button press or camera snapshot) can
         # swap replies. Serialize them.
         self._request_lock = threading.Lock()
+        self._virtual_cam_supported = True
         self.coordinator: DataUpdateCoordinator[dict[str, Any]] | None = None
 
     @property
@@ -84,18 +86,14 @@ class OBSConnection:
             import obsws_python as obs
 
             conn._req_client = obs.ReqClient(**conn._get_kwargs())
+            # A fresh connection may be to an OBS that has since gained a virtual camera.
+            conn._virtual_cam_supported = True
 
-            class _Events(obs.EventClient):
-                def on_stream_state_changed(self_: Any, data: Any) -> None:
-                    conn._on_event()
-
-                def on_record_state_changed(self_: Any, data: Any) -> None:
-                    conn._on_event()
-
-            events = _Events(**conn._get_kwargs())
-            # obsws-python only dispatches events to functions registered via callback.register()
-            events.callback.register(events.on_stream_state_changed)
-            events.callback.register(events.on_record_state_changed)
+            events = obs.EventClient(**conn._get_kwargs())
+            # obsws-python only dispatches events to functions registered via
+            # callback.register(), matching them by __name__ ("on_<event>").
+            for event in REFRESH_EVENTS:
+                events.callback.register(conn._make_event_handler(event))
             conn._event_client = events
 
         try:
@@ -104,6 +102,15 @@ class OBSConnection:
             if is_auth_error(err):
                 raise OBSAuthError(str(err)) from err
             raise
+
+    def _make_event_handler(self, event: str) -> Callable[[Any], None]:
+        """Return a callback that obsws-python dispatches for `event`."""
+
+        def handler(data: Any) -> None:
+            self._on_event()
+
+        handler.__name__ = f"on_{event}"
+        return handler
 
     def _on_event(self) -> None:
         """Handle OBS event from EventClient thread."""
@@ -158,9 +165,30 @@ class OBSConnection:
                 "record_status": client.get_record_status(),
                 "service_settings": client.get_stream_service_settings(),
                 "stats": client.get_stats(),
+                "scenes": parse_scene_list(client.get_scene_list()),
+                "virtual_cam": self._fetch_virtual_cam(client),
             }
 
         return await self._async_request(_fetch)
+
+    def _fetch_virtual_cam(self, client: Any) -> bool | None:
+        """Return whether the virtual camera is on, or None if OBS has none.
+
+        OBS answers GetVirtualCamStatus with an error when it has no virtual
+        camera (on Linux, without the v4l2loopback module). obsws-python logs
+        every failed request as an error, so stop asking until the next
+        reconnect rather than logging it on every poll.
+        """
+        if not self._virtual_cam_supported:
+            return None
+        try:
+            return bool_field(client.get_virtual_cam_status(), "output_active")
+        except Exception as err:
+            if not is_request_error(err):
+                raise
+            _LOGGER.info("OBS at %s has no virtual camera: %s", self.host, err)
+            self._virtual_cam_supported = False
+            return None
 
     async def async_start_stream(self) -> None:
         """Start streaming in OBS."""
@@ -177,6 +205,18 @@ class OBSConnection:
     async def async_stop_record(self) -> None:
         """Stop recording in OBS."""
         await self._async_request(lambda client: client.stop_record())
+
+    async def async_start_virtual_cam(self) -> None:
+        """Start the OBS virtual camera."""
+        await self._async_request(lambda client: client.start_virtual_cam())
+
+    async def async_stop_virtual_cam(self) -> None:
+        """Stop the OBS virtual camera."""
+        await self._async_request(lambda client: client.stop_virtual_cam())
+
+    async def async_set_program_scene(self, scene: str) -> None:
+        """Switch the OBS program output to `scene`."""
+        await self._async_request(lambda client: client.set_current_program_scene(scene))
 
     async def async_get_program_screenshot(self, size: int) -> bytes:
         """Return a JPEG of the current program scene, its longer side `size` pixels."""
@@ -224,6 +264,36 @@ def numeric_field(obj: Any, attr: str) -> float | None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
     return value
+
+
+def bool_field(obj: Any, attr: str) -> bool | None:
+    """Return a boolean response field, or None when it is missing."""
+    value = getattr(obj, attr, None)
+    return value if isinstance(value, bool) else None
+
+
+def _int_or_zero(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def parse_scene_list(response: Any) -> dict[str, Any]:
+    """Reduce a GetSceneList response to the program scene and the scene names.
+
+    OBS lists scenes bottom first (sceneIndex 0 is the last scene in the
+    Scenes dock), so sort by sceneIndex descending to match the dock.
+    """
+    scenes = getattr(response, "scenes", None)
+    entries = [
+        scene
+        for scene in (scenes if isinstance(scenes, list) else [])
+        if isinstance(scene, dict) and isinstance(scene.get("sceneName"), str)
+    ]
+    entries.sort(key=lambda scene: _int_or_zero(scene.get("sceneIndex")), reverse=True)
+    current = getattr(response, "current_program_scene_name", None)
+    return {
+        "current": current if isinstance(current, str) else None,
+        "names": [scene["sceneName"] for scene in entries],
+    }
 
 
 def _skipped_pct(prev: dict[str, float | None], cur: dict[str, float | None], prefix: str) -> float | None:
