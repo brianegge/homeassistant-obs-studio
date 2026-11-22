@@ -21,12 +21,10 @@ from homeassistant.const import (
     UnitOfTime,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import OBSConfigEntry, OBSCoordinator, numeric_field
-from .const import DOMAIN
+from .entity import OBSEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,20 +47,8 @@ async def async_setup_entry(  # NOSONAR
     )
 
 
-class OBSSensorBase(CoordinatorEntity[OBSCoordinator], SensorEntity):
+class OBSSensorBase(OBSEntity, SensorEntity):
     """Base class for OBS sensors."""
-
-    _attr_has_entity_name = True
-
-    def __init__(self, coordinator: OBSCoordinator, entry: OBSConfigEntry) -> None:
-        """Initialize."""
-        super().__init__(coordinator)
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=f"OBS Studio ({entry.data['host']})",
-            manufacturer="OBS Project",
-            sw_version=None,
-        )
 
 
 class OBSStreamStatusSensor(OBSSensorBase):

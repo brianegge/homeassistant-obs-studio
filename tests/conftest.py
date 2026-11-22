@@ -120,14 +120,41 @@ def make_service_settings(
     )
 
 
-def make_event_client_class() -> type:
-    """Create a stand-in for obsws_python.EventClient, which the integration subclasses."""
+def make_scene_list(names: list[str], *, current: str | None = None) -> SimpleNamespace:
+    """Create a mock GetSceneList response, `names` in Scenes dock order (top first).
 
-    def _init(self, **kwargs) -> None:
-        # obsws-python only dispatches events to functions registered via callback.register()
-        self.callback = MagicMock()
+    Like OBS, the response lists scenes bottom first, with sceneIndex 0 for the last.
+    """
+    count = len(names)
+    scenes = [
+        {"sceneIndex": count - 1 - i, "sceneName": name, "sceneUuid": f"uuid-{i}"} for i, name in enumerate(names)
+    ]
+    return SimpleNamespace(
+        current_program_scene_name=current if current is not None else (names[0] if names else None),
+        current_preview_scene_name=None,
+        scenes=list(reversed(scenes)),
+    )
 
-    return type("EventClient", (), {"__init__": _init})
+
+def make_virtual_cam_status(*, active: bool = False) -> SimpleNamespace:
+    """Create a mock GetVirtualCamStatus response."""
+    return SimpleNamespace(output_active=active)
+
+
+class OBSSDKRequestError(Exception):
+    """Stand-in for obsws_python.error.OBSSDKRequestError (matched by class name)."""
+
+    def __init__(self, req_name: str, code: int, comment: str | None = None) -> None:
+        self.req_name = req_name
+        self.code = code
+        message = f"Request {req_name} returned code {code}."
+        if comment:
+            message += f" With message: {comment}"
+        super().__init__(message)
+
+
+# What OBS answers GetVirtualCamStatus with when it has no virtual camera.
+NO_VIRTUAL_CAM_ERROR = OBSSDKRequestError("GetVirtualCamStatus", 604, "VirtualCam is not available.")
 
 
 @pytest.fixture
@@ -152,6 +179,8 @@ def mock_req_client() -> MagicMock:
     client.get_record_status.return_value = make_record_status()
     client.get_stream_service_settings.return_value = make_service_settings()
     client.get_stats.return_value = make_stats()
+    client.get_scene_list.return_value = make_scene_list(["Starting", "Live", "BRB"], current="Live")
+    client.get_virtual_cam_status.return_value = make_virtual_cam_status()
     client.disconnect.return_value = None
     return client
 
@@ -161,8 +190,6 @@ def mock_obsws(mock_req_client: MagicMock):
     """Patch obsws_python with mock clients."""
     mock_obs = MagicMock()
     mock_obs.ReqClient.return_value = mock_req_client
-    # EventClient is subclassed, so provide a base class
-    mock_obs.EventClient = make_event_client_class()
 
     with patch.dict("sys.modules", {"obsws_python": mock_obs}):
         yield mock_obs

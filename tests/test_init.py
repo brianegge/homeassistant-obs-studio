@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -15,14 +16,13 @@ from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.obs_websocket import OBSRuntimeData
-from custom_components.obs_websocket.const import DOMAIN, EVENT_REFRESH_COOLDOWN
+from custom_components.obs_websocket.const import DOMAIN, EVENT_REFRESH_COOLDOWN, OBS_EVENTS
 
 from .conftest import (
     MOCK_CONFIG,
     MOCK_HOST,
     MOCK_PORT,
     WRONG_PASSWORD_ERROR,
-    make_event_client_class,
     make_service_settings,
     make_stream_status,
 )
@@ -32,7 +32,6 @@ def _make_mock_obs(req_client: MagicMock) -> MagicMock:
     """Create a mock obsws_python module."""
     mock_obs = MagicMock()
     mock_obs.ReqClient.return_value = req_client
-    mock_obs.EventClient = make_event_client_class()
     return mock_obs
 
 
@@ -91,7 +90,6 @@ async def test_setup_entry_connection_failure(hass: HomeAssistant) -> None:
 
     mock_obs = MagicMock()
     mock_obs.ReqClient.side_effect = ConnectionRefusedError("Connection refused")
-    mock_obs.EventClient = make_event_client_class()
 
     with patch.dict("sys.modules", {"obsws_python": mock_obs}):
         await hass.config_entries.async_setup(entry.entry_id)
@@ -278,7 +276,7 @@ async def test_on_event_no_coordinator(hass: HomeAssistant) -> None:
     connection.coordinator = None
 
     # Should not raise
-    connection._on_event()
+    connection._on_event("stream_state_changed")
 
 
 async def test_coordinator_reconnects_after_disconnect(
@@ -313,8 +311,8 @@ async def test_coordinator_reconnects_after_disconnect(
         assert connection.connected
 
 
-async def test_stream_state_changed_callback_is_registered(hass: HomeAssistant) -> None:
-    """Test that the stream state callback is registered with obsws-python.
+async def test_refresh_event_callbacks_are_registered(hass: HomeAssistant) -> None:
+    """Test that a callback is registered with obsws-python for each event, and passes it on.
 
     obsws-python only dispatches events to functions registered via ``callback.register()``.
     """
@@ -336,12 +334,13 @@ async def test_stream_state_changed_callback_is_registered(hass: HomeAssistant) 
         connection = entry.runtime_data.connection
         register = connection._event_client.callback.register
         callbacks = {call.args[0].__name__: call.args[0] for call in register.call_args_list}
-        assert set(callbacks) == {"on_stream_state_changed", "on_record_state_changed"}
+        assert set(callbacks) == {f"on_{event}" for event in OBS_EVENTS}
+        assert {"on_virtualcam_state_changed", "on_current_program_scene_changed"} <= set(callbacks)
 
-        for callback in callbacks.values():
+        for name, callback in callbacks.items():
             with patch.object(connection, "_on_event") as on_event:
                 callback({})
-            on_event.assert_called_once_with()
+            on_event.assert_called_once_with(name.removeprefix("on_"), {})
 
 
 async def test_on_event_requests_debounced_refresh(hass: HomeAssistant) -> None:
@@ -365,7 +364,7 @@ async def test_on_event_requests_debounced_refresh(hass: HomeAssistant) -> None:
         connection = entry.runtime_data.connection
 
         with patch.object(coordinator, "async_request_refresh", new_callable=AsyncMock) as refresh:
-            connection._on_event()
+            connection._on_event("stream_state_changed")
             for _ in range(10):
                 await asyncio.sleep(0)
 
@@ -394,14 +393,14 @@ async def test_event_burst_refreshes_immediately_then_coalesces(hass: HomeAssist
         req_client.get_stream_status.reset_mock()
 
         # STARTING: refreshed right away, OBS not active yet
-        connection._on_event()
+        connection._on_event("stream_state_changed")
         await _flush_event(hass)
         assert req_client.get_stream_status.call_count == 1
         assert coordinator.data["stream_status"].output_active is False
 
         # STARTED arrives within the cooldown: deferred, not dropped
         req_client.get_stream_status.return_value = make_stream_status(active=True)
-        connection._on_event()
+        connection._on_event("stream_state_changed")
         await _flush_event(hass)
         assert req_client.get_stream_status.call_count == 1
 
@@ -436,11 +435,55 @@ async def test_on_event_after_unload_does_not_reconnect(hass: HomeAssistant) -> 
         assert connection.coordinator is None
 
         mock_obs.ReqClient.reset_mock()
-        connection._on_event()
+        connection._on_event("stream_state_changed")
         await _flush_event(hass)
 
         mock_obs.ReqClient.assert_not_called()
         assert not connection.connected
+
+
+async def test_concurrent_requests_connect_once(hass: HomeAssistant) -> None:
+    """Requests that all find the connection down share one reconnect.
+
+    Each extra connect would leave an EventClient running that nothing closes.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=MOCK_HOST,
+        data=MOCK_CONFIG.copy(),
+        unique_id=f"{MOCK_HOST}:{MOCK_PORT}",
+    )
+    entry.add_to_hass(hass)
+
+    req_client = _make_req_client()
+    mock_obs = _make_mock_obs(req_client)
+
+    with patch.dict("sys.modules", {"obsws_python": mock_obs}):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        connection = entry.runtime_data.connection
+        await connection.async_disconnect()
+        mock_obs.ReqClient.reset_mock()
+        mock_obs.EventClient.reset_mock()
+
+        def _slow_connect(**kwargs: object) -> MagicMock:
+            # Long enough that every request starts before the first connect finishes.
+            time.sleep(0.05)
+            return req_client
+
+        mock_obs.ReqClient.side_effect = _slow_connect
+
+        await asyncio.gather(
+            connection.async_start_stream(),
+            connection.async_stop_stream(),
+            connection.async_fetch_data(),
+        )
+
+        mock_obs.ReqClient.assert_called_once()
+        mock_obs.EventClient.assert_called_once()
+        req_client.start_stream.assert_called_once()
+        req_client.stop_stream.assert_called_once()
 
 
 async def test_command_reconnects_on_stale_socket(hass: HomeAssistant) -> None:
@@ -463,7 +506,6 @@ async def test_command_reconnects_on_stale_socket(hass: HomeAssistant) -> None:
 
     mock_obs = MagicMock()
     mock_obs.ReqClient.side_effect = [stale, fresh]
-    mock_obs.EventClient = make_event_client_class()
 
     with patch.dict("sys.modules", {"obsws_python": mock_obs}):
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -495,7 +537,6 @@ async def test_command_raises_when_reconnect_also_fails(hass: HomeAssistant) -> 
 
     mock_obs = MagicMock()
     mock_obs.ReqClient.side_effect = [first, second]
-    mock_obs.EventClient = make_event_client_class()
 
     with patch.dict("sys.modules", {"obsws_python": mock_obs}):
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -534,7 +575,6 @@ async def test_setup_entry_auth_failure_starts_reauth(hass: HomeAssistant) -> No
 
     mock_obs = MagicMock()
     mock_obs.ReqClient.side_effect = WRONG_PASSWORD_ERROR
-    mock_obs.EventClient = make_event_client_class()
 
     with patch.dict("sys.modules", {"obsws_python": mock_obs}):
         await hass.config_entries.async_setup(entry.entry_id)

@@ -4,7 +4,7 @@
 
 [OBS Studio](https://obsproject.com/) is a free, open-source application for video recording and live streaming. It is widely used by content creators, gamers, and professionals for streaming to platforms such as Twitch, YouTube, and Facebook Live.
 
-This custom Home Assistant integration connects to OBS Studio via the [WebSocket v5 protocol](https://github.com/obsproject/obs-websocket), exposing real-time stream status, recording status, stream health and performance statistics, and service configuration as sensors, a snapshot camera of the program output, and buttons to start and stop streaming and recording. It uses a persistent connection with event-driven updates for near-instant state changes.
+This custom Home Assistant integration connects to OBS Studio via the [WebSocket v5 protocol](https://github.com/obsproject/obs-websocket), exposing real-time stream status, recording status, stream health and performance statistics, and service configuration as sensors, a snapshot camera of the program output, buttons to start and stop streaming and recording, a switch for the virtual camera, and a scene picker that switches the program scene. It uses a persistent connection with event-driven updates for near-instant state changes.
 
 ## Requirements
 
@@ -25,19 +25,29 @@ This custom Home Assistant integration connects to OBS Studio via the [WebSocket
 
 ### Manual
 
-1. Copy the `obs_websocket` folder to your Home Assistant `custom_components` directory:
+1. Copy the whole `custom_components/obs_websocket` folder from this repository into your Home Assistant `custom_components` directory, including the `translations` and `brand` subfolders:
 
    ```
    custom_components/
    └── obs_websocket/
+       ├── brand/
+       ├── translations/
        ├── __init__.py
        ├── button.py
+       ├── camera.py
        ├── config_flow.py
        ├── const.py
+       ├── diagnostics.py
+       ├── entity.py
+       ├── errors.py
        ├── icons.json
        ├── manifest.json
+       ├── py.typed
+       ├── quality_scale.yaml
+       ├── select.py
        ├── sensor.py
-       └── strings.json
+       ├── strings.json
+       └── switch.py
    ```
 
 2. Restart Home Assistant.
@@ -159,6 +169,22 @@ Press to start recording in OBS, to the output path set in OBS. Independent of s
 
 Press to stop recording in OBS. Raises an error if OBS is unreachable or recording cannot be stopped (e.g. not currently recording).
 
+### Switch
+
+#### Virtual Camera
+
+Turns the OBS virtual camera on and off, and shows whether it is running. It changes if the virtual camera is started or stopped from OBS itself too. Handy for video calls: turn it on from a dashboard or an automation without going to the OBS window.
+
+The switch is **unavailable** when OBS has no virtual camera. On Linux that usually means the `v4l2loopback` kernel module is not installed or loaded. Once you have set it up, restart OBS and the switch becomes available after the integration reconnects.
+
+### Select
+
+#### Scene
+
+Shows the scene OBS is sending to program (the stream, recording and virtual camera) and lets you switch to another one. The options are the scenes in the current scene collection, in the same order as the OBS Scenes dock, and they update straight away when you add, remove or rename a scene or change scene collection. Switching uses OBS's current transition.
+
+In studio mode, choosing a scene sends it straight to program. If **Swap Preview/Output Scenes After Transitioning** is enabled, the previous program scene replaces the preview scene after the transition.
+
 ## Configuration
 
 | Field | Default | Description |
@@ -173,16 +199,20 @@ After initial setup, you can reconfigure the connection (host, port, password) v
 
 The integration maintains a persistent WebSocket connection to OBS with two update mechanisms:
 
-- **Event-driven (primary):** The `EventClient` listens for `StreamStateChanged` and `RecordStateChanged` events from OBS, triggering an immediate sensor refresh when the stream or recording starts, stops, pauses, or reconnects.
+- **Event-driven (primary):** The `EventClient` listens for stream, recording, virtual camera and scene events from OBS (`StreamStateChanged`, `RecordStateChanged`, `VirtualcamStateChanged`, `CurrentProgramSceneChanged`, and the scene list, rename and scene collection events) and updates as soon as one arrives. Stream, recording and virtual camera events trigger a full refresh. A scene change is taken straight from the event, and a scene list change re-reads only the scene list, so cutting between scenes often does not make Home Assistant re-read everything each time.
 - **Heartbeat poll (fallback):** A `DataUpdateCoordinator` polls OBS every **60 seconds** to sync state in case an event is missed or the connection was briefly interrupted.
 
 The performance and stream-health sensors update on the same poll (and on stream/record events), so their resolution is about a minute. The program camera fetches a new screenshot on demand instead.
 
+The switch and the scene select show the new state as soon as OBS accepts a command, so they settle even if OBS's event is missed. The next poll confirms it.
+
 Requests are sent one at a time over the connection: `obsws-python` does not match replies to request IDs, so overlapping requests (a poll, a button press, a camera snapshot) could otherwise receive each other's replies.
 
-If the connection to OBS drops, sensors are marked **unavailable** and the coordinator attempts to reconnect on the next poll cycle.
+If the connection to OBS drops, all of its entities are marked **unavailable** and the coordinator attempts to reconnect on the next poll cycle.
 
 ## Automation Examples
+
+Entity IDs include the OBS host you set up, so an OBS at `192.168.1.100` gives IDs such as `sensor.obs_studio_192_168_1_100_stream_status`. The examples below use that host; swap in your own IDs from **Settings > Devices & Services > OBS WebSocket**.
 
 **Notify when streaming starts:**
 
@@ -191,7 +221,7 @@ automation:
   - alias: "Notify stream started"
     trigger:
       - platform: state
-        entity_id: sensor.obs_stream_status
+        entity_id: sensor.obs_studio_192_168_1_100_stream_status
         to: "streaming"
     action:
       - service: notify.mobile_app
@@ -206,13 +236,13 @@ automation:
   - alias: "Alert frame drops"
     trigger:
       - platform: numeric_state
-        entity_id: sensor.obs_studio_stream_dropped_frames
+        entity_id: sensor.obs_studio_192_168_1_100_stream_dropped_frames
         above: 2
         for: "00:02:00"
     action:
       - service: notify.mobile_app
         data:
-          message: "OBS is dropping {{ states('sensor.obs_studio_stream_dropped_frames') }}% of stream frames"
+          message: "OBS is dropping {{ states('sensor.obs_studio_192_168_1_100_stream_dropped_frames') }}% of stream frames"
 ```
 
 **Warn when OBS can't keep up before going live:**
@@ -222,15 +252,15 @@ automation:
   - alias: "OBS rendering behind"
     trigger:
       - platform: numeric_state
-        entity_id: sensor.obs_studio_render_skipped_frames
+        entity_id: sensor.obs_studio_192_168_1_100_render_skipped_frames
         above: 5
         for: "00:05:00"
     action:
       - service: notify.mobile_app
         data:
           message: >
-            OBS is skipping {{ states('sensor.obs_studio_render_skipped_frames') }}% of rendered
-            frames ({{ states('sensor.obs_studio_active_fps') }} fps)
+            OBS is skipping {{ states('sensor.obs_studio_192_168_1_100_render_skipped_frames') }}% of rendered
+            frames ({{ states('sensor.obs_studio_192_168_1_100_active_fps') }} fps)
 ```
 
 **Turn off lights when stream goes live:**
@@ -240,7 +270,7 @@ automation:
   - alias: "Stream mode lighting"
     trigger:
       - platform: state
-        entity_id: sensor.obs_stream_status
+        entity_id: sensor.obs_studio_192_168_1_100_stream_status
         to: "streaming"
     action:
       - service: light.turn_off
@@ -248,17 +278,57 @@ automation:
           area_id: office
 ```
 
+**Switch to a "Be Right Back" scene when you leave your desk:**
+
+```yaml
+automation:
+  - alias: "BRB when the office is empty"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.office_occupancy
+        to: "off"
+        for: "00:01:00"
+    condition:
+      - condition: state
+        entity_id: sensor.obs_studio_192_168_1_100_stream_status
+        state: "streaming"
+    action:
+      - service: select.select_option
+        target:
+          entity_id: select.obs_studio_192_168_1_100_scene
+        data:
+          option: "Be Right Back"
+```
+
+**Start the virtual camera when a meeting starts:**
+
+```yaml
+automation:
+  - alias: "Virtual camera for meetings"
+    trigger:
+      - platform: state
+        entity_id: calendar.work
+        to: "on"
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.obs_studio_192_168_1_100_virtual_camera
+```
+
 ## Use Cases
 
 - **Stream monitoring dashboards** - Display stream status, bitrate, dropped frames, and a snapshot of the program output on a Lovelace dashboard.
 - **Automated notifications** - Get alerts on your phone when a stream starts, stops, or experiences issues.
 - **Smart home integration** - Trigger lights, cameras, or "on air" signs when you go live.
+- **Scene control** - Switch scenes from a dashboard, a physical button, or an automation, such as a BRB scene when you step away.
+- **Video calls** - Start and stop the OBS virtual camera alongside meetings or a "do not disturb" mode.
 - **Uptime tracking** - Log stream duration and stability over time using the recorder.
 
 ## Known Limitations
 
 - **Synchronous library** - The underlying `obsws-python` library uses threads rather than asyncio, so all calls are wrapped with `async_add_executor_job`.
-- **Single stream output** - Only the primary stream output is monitored. Virtual cam and replay buffer status are not currently tracked.
+- **Single stream output** - Only the primary stream output is monitored. Replay buffer status is not currently tracked.
+- **Program scene only** - The scene select controls the program scene. In studio mode the preview scene is not exposed, and the transition used is whichever one is selected in OBS.
 - **No auto-discovery** - You must manually enter the OBS host and port; the integration cannot discover OBS instances on the network.
 - **No device firmware version** - The OBS version is not currently reported in device info.
 - **Minute resolution** - Performance and stream-health sensors are polled about once a minute; short spikes between polls are averaged into the window.
@@ -271,6 +341,8 @@ automation:
 | Sensors show "unavailable" | OBS may have been closed or the network connection was lost. The integration will automatically reconnect within 60 seconds when OBS becomes reachable. |
 | State doesn't update immediately | Verify OBS is version 28+. Older versions may not emit WebSocket v5 events. The fallback poll interval is 60 seconds. |
 | Integration won't load after HA update | Check the Home Assistant logs for errors. You may need to update the `obsws-python` dependency or the integration code. |
+| Virtual camera switch is unavailable | OBS has no virtual camera. On Linux, install and load `v4l2loopback`, then restart OBS. The switch becomes available after the integration reconnects (within about a minute), or reload the integration to pick it up straight away. |
+| Scene select shows "unknown" | OBS reported a program scene that is not in the scene list, which can happen for a moment while switching scene collections. It corrects itself when the switch finishes. |
 | Password changed in OBS | Home Assistant shows a **Re-authenticate** prompt under **Settings > Devices & Services**; enter the new password there. To change the host or port as well, use **(three-dot menu) > Reconfigure**. |
 
 ## Dependencies
